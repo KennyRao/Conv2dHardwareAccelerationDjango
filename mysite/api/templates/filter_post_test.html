@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload and Apply Filter</title>
+</head>
+<body>
+    <h2>POST</h2>
+    <form id="filterForm">
+        <label>Image:</label>
+        <input type="file" name="image" id="imageInput" required><br><br>
+        <label>Filter (9 numbers):</label><br>
+        <input type="text" name="filter" id="filterInput" placeholder="-1 -1 -1 -1 8 -1 -1 -1 -1" required style="width: 300px;"><br><br>
+        <label>Factor:</label><br>
+        <input type="number" name="factor" id="factorInput" value="1" required><br><br>
+        <button type="submit">Upload and Apply Filter</button>
+    </form>
+    <h3>Processed Image:</h3>
+    <img id="resultImage" style="max-width: 400px;"/>
+
+    <script>
+        const form = document.getElementById("filterForm");
+        const resultImg = document.getElementById("resultImage");
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const imageFile = document.getElementById("imageInput").files[0];
+            const filterText = document.getElementById("filterInput").value;
+            const factorValue = document.getElementById("factorInput").value;
+
+            const formData = new FormData();
+            formData.append("image", imageFile);
+            formData.append("filter", filterText);
+            formData.append("factor", factorValue);
+
+            try {
+                const response = await fetch("/filter/", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    resultImg.src = URL.createObjectURL(blob);
+                } else {
+                    alert("Filter application failed.");
+                }
+            } catch (err) {
+                console.error("Error:", err);
+                alert("Error submitting filter.");
+            }
+        };
+    </script>
+</body>
+</html>

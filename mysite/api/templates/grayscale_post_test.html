@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head><title>Upload and View Grayscale</title></head>
+<body>
+    <h2>Get</h2>
+    <img id="fetchedImage" style="max-width: 400px;"/>
+    <h2>Post</h2>
+    <form id="uploadForm">
+        <input type="file" name="image" id="imageInput" required>
+        <button type="submit">Upload</button>
+    </form>
+    <h3>Processed Image:</h3>
+    <img id="resultImage" style="max-width: 400px;"/>
+
+    <script>
+        const form = document.getElementById("uploadForm");
+        const resultImg = document.getElementById("resultImage");
+        const fetchedImg = document.getElementById("fetchedImage")
+
+        window.onload = async () => {
+            try {
+                const response = await fetch("/grayscale/");
+                if (response.ok) {
+                    const blob = await response.blob();
+                    fetchedImg.src = URL.createObjectURL(blob);
+                } else {
+                    console.log("No existing image found.");
+                }
+            } catch (err) {
+                console.error("Error fetching image:", err);
+            }
+        };
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById("imageInput");
+            const formData = new FormData();
+            formData.append("image", fileInput.files[0]);
+
+            const response = await fetch("/grayscale/", {
+                method: "POST",
+                body: formData
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                resultImg.src = URL.createObjectURL(blob);
+            } else {
+                alert("Upload failed");
+            }
+        };
+    </script>
+</body>
+</html>
