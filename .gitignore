@@ -3,3 +3,6 @@
 # Byte‑compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+
+# Ignore all Python cache directories
+**/__pycache__/
