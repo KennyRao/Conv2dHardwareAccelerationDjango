@@ -1,0 +1,21 @@
+{% comment %} mysite/imaging/templates/imaging/grayscale.html {% endcomment %}
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<h2>Hardware Grayscale</h2>
+<form id="gsForm" class="mb-3">
+  {% csrf_token %}
+  <input class="form-control mb-2" type="file" name="image" required>
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" id="useScipy" name="use_scipy">
+    <label class="form-check-label" for="useScipy">Also run SciPy in software</label>
+  </div>
+  <button class="btn btn-success">Upload</button>
+</form>
+
+<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;">
+  <!-- Cards injected by JS -->
+</div>
+
+<script src="{% static 'imaging/js/grayscale.js' %}" defer></script>
+{% endblock %}

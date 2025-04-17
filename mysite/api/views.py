@@ -12,6 +12,11 @@ import uuid
 import time
 from django.http import HttpResponse
 import shutil
+import base64
+from .jobutils import (
+    enqueue_filter_job, wait_for_file, run_scipy_filter_locally,
+    read_time, cleanup
+)
 
 # Create your views here.
 class TestAPIView(APIView):
@@ -77,56 +82,37 @@ class FilterAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
-        uploaded_file = request.FILES.get('image')
-        if not uploaded_file:
-            return Response({"error": "No image uploaded"}, status=400)
-        
-        filter_str = request.POST.get('filter')
-        factor_str = request.POST.get('factor')
-        if not filter_str or not factor_str:
-            return Response({"error": "Missing 'filter' or 'factor'"}, status=400)
+        file = request.FILES.get('image')
+        if file is None:
+            return Response({"error": "No image"}, status=400)
+
+        raw_coeffs = request.data.get('filter', '').strip()
+        coeffs = list(map(int, raw_coeffs.split())) if raw_coeffs else []
+        if coeffs and len(coeffs) != 9:
+            return Response({"error": "Need 9 integers"}, status=400)
 
         try:
-            filter_values = list(map(int, filter_str.strip().split()))
-            if len(filter_values) != 9:
-                raise ValueError
-            factor = int(factor_str.strip())
+            factor = int(request.data.get('factor', 1))
         except ValueError:
-            return Response({"error": "Invalid filter or factor format"}, status=400)
+            return Response({"error": "Factor must be int"}, status=400)
 
-        job_id = f"job_{uuid.uuid4().hex}"
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        jobs_dir = os.path.join(base_dir, 'jobs')
-        job_path = os.path.join(jobs_dir, job_id)
-        os.makedirs(job_path, exist_ok=True)
-        input_path = os.path.join(job_path, 'in.jpg')
+        job_id, job_path, out_path, done_path = enqueue_filter_job(file, coeffs, factor)
 
-        # Open image using PIL and save to job folder
-        image = Image.open(uploaded_file).save(input_path)
+        try:
+            wait_for_file(done_path)
+        except TimeoutError:
+            cleanup(job_path)
+            return Response({"error": "Hardware timeout"}, status=504)
 
-        with open(os.path.join(job_path, 'kernel.txt'), 'w') as f:
-            f.write('filter')
+        hw_b64 = base64.b64encode(out_path.read_bytes()).decode()
+        resp = {
+            "hw_image": hw_b64,
+            "hw_time": read_time(job_path, "hw_time.txt")
+        }
 
-        with open(os.path.join(job_path, 'filter.txt'), 'w') as f:
-            f.write(filter_str.strip())
+        if 'use_scipy' in request.POST:
+            sw_b64, sw_time = run_scipy_filter_locally(file, coeffs, factor)
+            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_time:.4f} s"})
 
-        with open(os.path.join(job_path, 'factor.txt'), 'w') as f:
-            f.write(str(factor))
-
-        done_path = os.path.join(job_path, 'done.txt')
-        output_path = os.path.join(job_path, 'out.jpg')
-
-        for _ in range(30):  # wait up to 30 seconds
-            if os.path.exists(done_path) and os.path.exists(output_path):
-                with open(output_path, 'rb') as f:
-                    image_bytes = f.read()
-
-                # Cleanup job folder after response is prepared
-                try:
-                    shutil.rmtree(job_path)
-                except Exception as cleanup_err:
-                    print(f"Cleanup error (grayscale): {cleanup_err}")
-                return HttpResponse(image_bytes, content_type='image/jpeg')
-            time.sleep(1)
-
-        return JsonResponse({"error": "Timeout or processing failed"}, status=504)
+        cleanup(job_path)
+        return Response(resp, status=200)
