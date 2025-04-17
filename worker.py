@@ -207,7 +207,7 @@ def handle_video(job: Path, kind: str):
         Image.fromarray(first_snap).save(job / "out.jpg")
 
     (job / "hw_time.txt").write_text(
-        f"{total_ms:.2f} ms ({frames}f, avg {total_ms/frames if frames else 0:.2f} ms)"
+        f"{total_ms:.2f} ms ({frames}f, avg {total_ms/frames if frames else 0:.2f} ms/f)"
     )
     (job / "done.txt").write_text("done")
     log.info("✔ VIDEO job %s complete – %d frames, total %.2f ms",
