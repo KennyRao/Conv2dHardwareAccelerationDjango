@@ -125,4 +125,4 @@ class HistoryAPIView(APIView):
             if (j / "done.txt").exists():
                 from shutil import rmtree
                 rmtree(j, ignore_errors=True)
-        return Response({"status": "cleared"})
+        return Response({"status": "cleared"}, status=204)
