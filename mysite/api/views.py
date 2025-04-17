@@ -187,7 +187,6 @@ class HistoryAPIView(APIView):
         # wipe all completed jobs
         removed = []
         for j in JOBS_ROOT.iterdir():
-            if (j / "done.txt").exists():
-                shutil.rmtree(j, ignore_errors=True)
-                removed.append(j.name)
+            shutil.rmtree(j, ignore_errors=True)
+            removed.append(j.name)
         return Response({"deleted": removed}, status=204)
