@@ -50,7 +50,7 @@ class FilterKernel(DefaultIP):
 
     @kernel.setter
     def kernel(self, matrix):
-        flat = np.array(matrix, dtype=np.int32).ravel()
+        flat = np.array(matrix, dtype=np.int32).flatten()
         if flat.size != 9:
             raise ValueError("Kernel must be 3×3")
         for i, val in enumerate(flat):
