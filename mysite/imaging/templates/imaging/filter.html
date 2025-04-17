@@ -1,5 +1,5 @@
 {% comment %} mysite/imaging/templates/imaging/filter.html {% endcomment %}
-{% extends "base.html" %}
+{% extends "imaging/base.html" %}
 {% load static %}
 {% block content %}
 <h2>Hardware 3×3 Filter</h2>
@@ -29,9 +29,6 @@
   <button class="btn btn-success">Upload</button>
 </form>
 
-<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;">
-  <!-- Cards injected by JS -->
-</div>
-
+<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;"></div>
 <script src="{% static 'imaging/js/filter.js' %}" defer></script>
 {% endblock %}

@@ -1,13 +1,11 @@
 # mysite/imaging/views.py
 from django.views.generic import TemplateView
-from django.shortcuts import render
-from .forms import GrayscaleForm, FilterForm
 
 class HomeView(TemplateView):
-    template_name = "home.html"
+    template_name = "imaging/home.html"
 
 class GrayscalePageView(TemplateView):
-    template_name = "grayscale.html"
+    template_name = "imaging/grayscale.html"
 
 class FilterPageView(TemplateView):
-    template_name = "filter.html"
+    template_name = "imaging/filter.html"

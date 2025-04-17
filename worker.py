@@ -1,162 +1,163 @@
 # worker.py
+"""
+Background FPGA worker – continuously polls *jobs* directory, applies the
+requested accelerator (grayscale / 3×3 filter), writes JPEG result plus a
+'done.txt' *and* a 'hw_time.txt' containing runtime in milliseconds.
+"""
 import os
 import time
-from PIL import Image
+from pathlib import Path
+
 import numpy as np
+from PIL import Image
 from pynq import Overlay, allocate, DefaultIP
 
-jobs_dir = '/home/xilinx/f_c_a_api/mysite/api/jobs'
-current_overlay = None
-current_ip = None
-current_dma = None
-loaded_kernel = None
+JOBS_DIR = Path("/home/xilinx/f_c_a_api/mysite/api/jobs")
+current_overlay = current_ip = current_dma = loaded_kernel = None
 
-overlay_paths = {
-    'grayscale': '/home/xilinx/pynq/overlays/grayscale/grayscale.bit',
-    'filter': '/home/xilinx/pynq/overlays/filter/filter.bit',
+OVERLAY_PATHS = {
+    "grayscale": "/home/xilinx/pynq/overlays/grayscale/grayscale.bit",
+    "filter":    "/home/xilinx/pynq/overlays/filter/filter.bit",
 }
 
+
+# --------------------------------------------------------------------------- #
+# Custom driver for the HLS 3×3 filter kernel
+# --------------------------------------------------------------------------- #
 class FilterKernel(DefaultIP):
-    bindto = ['xilinx.com:hls:filter_kernel:1.0']
+    bindto = ["xilinx.com:hls:filter_kernel:1.0"]
+
     def __init__(self, description):
         super().__init__(description=description)
-        self.width_addr = self.register_map.image_width.address
-        self.height_addr = self.register_map.image_height.address
-        self.factor_addr = self.register_map.kernel_factor.address
-        self.kernel_addr = 0x40
-    
-    @property
-    def width(self):
-        return self.read(self.width_addr)
-    
-    @width.setter
-    def width(self, value):
-        self.write(self.width_addr, value)
-    
-    @property
-    def height(self):
-        return self.read(self.height_addr)
-    
-    @height.setter
-    def height(self, value):
-        self.write(self.height_addr, value)
-        
-    @property
-    def factor(self):
-        return self.read(self.factor_addr)
-    
-    @factor.setter
-    def factor(self, value):
-        self.write(self.factor_addr, value)
-    
+        self.width_addr   = self.register_map.image_width.address
+        self.height_addr  = self.register_map.image_height.address
+        self.factor_addr  = self.register_map.kernel_factor.address
+        self.kernel_addr  = 0x40  # start of 9×int32 kernel matrix
+
+    # Convenience properties
+    width  = property(lambda self: self.read(self.width_addr),
+                      lambda self, v: self.write(self.width_addr, v))
+    height = property(lambda self: self.read(self.height_addr),
+                      lambda self, v: self.write(self.height_addr, v))
+    factor = property(lambda self: self.read(self.factor_addr),
+                      lambda self, v: self.write(self.factor_addr, v))
+
     @property
     def kernel(self):
-        coefficients = []
-        for i in range(9):
-            value = self.read(self.kernel_addr + (4 * i))
-            coefficients.append(value)
-        return np.array(coefficients, dtype=np.int32).reshape(3, 3)
-    
+        data = [self.read(self.kernel_addr + 4 * i) for i in range(9)]
+        return np.array(data, dtype=np.int32).reshape(3, 3)
+
     @kernel.setter
     def kernel(self, matrix):
-        matrix = np.array(matrix, dtype=np.int32)
-        if matrix.shape != (3, 3):
-            raise ValueError(f"Kernel must be 3x3, got {matrix.shape}")
-        flat_coeffs = matrix.flatten()
-        for i, value in enumerate(flat_coeffs):
-            self.write(self.kernel_addr + (4 * i), int(value))
+        flat = np.array(matrix, dtype=np.int32).flatten()
+        if flat.size != 9:
+            raise ValueError("Kernel must be 3×3")
+        for i, val in enumerate(flat):
+            self.write(self.kernel_addr + 4 * i, int(val))
 
-def load_overlay(kernel):
+
+# --------------------------------------------------------------------------- #
+# Overlay management
+# --------------------------------------------------------------------------- #
+def load_overlay(kind: str):
+    """Load bitstream only when it differs from the one already loaded."""
     global current_overlay, current_ip, current_dma, loaded_kernel
-    if loaded_kernel == kernel:
-        return  # already loaded
-    
-    path = overlay_paths.get(kernel)
-    if not path:
-        raise ValueError(f"Unsupported kernel: {kernel}")
-    
+    if loaded_kernel == kind:
+        return
+
+    path = OVERLAY_PATHS[kind]
     current_overlay = Overlay(path)
-    match kernel:
-        case 'grayscale':
+
+    match kind:
+        case "grayscale":
             current_ip = current_overlay.grayscale_kernel_0
-        case 'filter':
+        case "filter":
             current_ip = current_overlay.filter_kernel_0
-            
+
     current_dma = current_overlay.axi_dma_0
-    loaded_kernel = kernel
+    loaded_kernel = kind
 
-def grayscale(img_array):
-        global current_ip
-        h, w, _ = img_array.shape
-        current_ip.write(0x10, w)
-        current_ip.write(0x18, h)
 
-def filter(combined, job_path):
-    with open(os.path.join(job_path, 'factor.txt')) as f:
-        factor = int(f.read().strip())
-    with open(os.path.join(job_path, 'filter.txt')) as f:
-        filter_str = f.read().strip()
-        filter_values = list(map(int, filter_str.split()))
-        if len(filter_values) != 9:
-            raise ValueError("filter.txt must contain exactly 9 values")
-        filter_matrix = np.array(filter_values, dtype=np.int32).reshape(3, 3)
-    
-    current_ip.height = combined.shape[0]
-    current_ip.width = combined.shape[1]
+# --------------------------------------------------------------------------- #
+# Per‑kernel configuration helpers
+# --------------------------------------------------------------------------- #
+def cfg_grayscale(img):
+    h, w, _ = img.shape
+    current_ip.write(0x10, w)
+    current_ip.write(0x18, h)
+
+
+def cfg_filter(img, job_path: Path):
+    factor = int((job_path / "factor.txt").read_text())
+    values = list(map(int, (job_path / "filter.txt").read_text().split()))
+    kernel = np.array(values, dtype=np.int32).reshape(3, 3)
+
+    h, w, _ = img.shape
+    current_ip.height = h
+    current_ip.width  = w
     current_ip.factor = factor
-    current_ip.kernel = filter_matrix
+    current_ip.kernel = kernel
 
+
+# --------------------------------------------------------------------------- #
+# Main loop
+# --------------------------------------------------------------------------- #
 while True:
-    for job_name in os.listdir(jobs_dir):
-        job_path = os.path.join(jobs_dir, job_name)
-        done_flag = os.path.join(job_path, 'done.txt')
-
-        if os.path.exists(done_flag):   # if job is already completed skip
-            continue
+    for job_name in os.listdir(JOBS_DIR):
+        job_path = JOBS_DIR / job_name
+        done_flag = job_path / "done.txt"
+        if done_flag.exists():
+            continue  # already processed
 
         try:
-            print(f"Processing job: {job_name}")
-            with open(os.path.join(job_path, 'kernel.txt')) as f:
-                kernel = f.read().strip()
-            
+            kernel = (job_path / "kernel.txt").read_text().strip()
             load_overlay(kernel)
+            img = np.array(Image.open(job_path / "in.jpg"))
+            combined = (
+                ((img[:, :, 0].astype(np.uint32) << 16) |
+                 (img[:, :, 1].astype(np.uint32) << 8) |
+                 img[:, :, 2].astype(np.uint32))
+            )
 
-            img = Image.open(os.path.join(job_path, 'in.jpg'))
-            img_array = np.array(img)
-            combined = ((img_array[:,:,0].astype(np.uint32) << 16) |
-                        (img_array[:,:,1].astype(np.uint32) << 8) |
-                         img_array[:,:,2].astype(np.uint32))
+            in_buf  = allocate(combined.shape, dtype=np.uint32)
+            out_buf = allocate(combined.shape, dtype=np.uint32)
+            in_buf[:] = combined
 
-            in_buffer = allocate(combined.shape, dtype=np.uint32)
-            in_buffer[:] = combined
-            out_buffer = allocate(combined.shape, dtype=np.uint32)
+            # Kernel‑specific register setup
+            if kernel == "grayscale":
+                cfg_grayscale(img)
+            else:
+                cfg_filter(img, job_path)
 
-            match kernel:
-                case 'grayscale':
-                    grayscale(img_array)
-                case 'filter':
-                    filter(combined, job_path)
-
-            current_ip.write(0x00, 1)
-            current_dma.sendchannel.transfer(in_buffer)
-            current_dma.recvchannel.transfer(out_buffer)
+            # ----------------------------------------------------------------
+            # Measure hardware time
+            # ----------------------------------------------------------------
+            t0 = time.perf_counter()
+            current_ip.write(0x00, 1)          # start
+            current_dma.sendchannel.transfer(in_buf)
+            current_dma.recvchannel.transfer(out_buf)
             current_dma.sendchannel.wait()
             current_dma.recvchannel.wait()
+            hw_ms = (time.perf_counter() - t0) * 1_000
+            (job_path / "hw_time.txt").write_text(f"{hw_ms:.2f} ms")
 
-            r = (out_buffer >> 16) & 0xFF
-            g = (out_buffer >> 8) & 0xFF
-            b = out_buffer & 0xFF
-            result_img = np.stack((r, g, b), axis=-1).astype(np.uint8)
+            # ----------------------------------------------------------------
+            # Convert 0xRRGGBB back to 3‑channel uint8 image
+            # ----------------------------------------------------------------
+            r = (out_buf >> 16) & 0xFF
+            g = (out_buf >> 8) & 0xFF
+            b = out_buf & 0xFF
+            result = np.stack((r, g, b), axis=-1).astype(np.uint8)
+            Image.fromarray(result).save(job_path / "out.jpg")
 
-            Image.fromarray(result_img).save(os.path.join(job_path, 'out.jpg'))
-            in_buffer.freebuffer()
-            out_buffer.freebuffer()
+            in_buf.freebuffer()
+            out_buf.freebuffer()
 
-            # signal done
-            with open(done_flag, 'w') as f:
-                f.write('done')
-            print(f"Completed {job_name}")
+            done_flag.write_text("done")
+            print("✓", job_name)
 
-        except Exception as e:
-            print("Worker error:", e)
+        except Exception as exc:
+            print("Worker error:", exc)
 
+    # Let the worker looks for new jobs roughly twice per second
+    time.sleep(0.5)

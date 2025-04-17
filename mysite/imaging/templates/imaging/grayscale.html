@@ -1,5 +1,5 @@
 {% comment %} mysite/imaging/templates/imaging/grayscale.html {% endcomment %}
-{% extends "base.html" %}
+{% extends "imaging/base.html" %}
 {% load static %}
 {% block content %}
 <h2>Hardware Grayscale</h2>
@@ -13,9 +13,6 @@
   <button class="btn btn-success">Upload</button>
 </form>
 
-<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;">
-  <!-- Cards injected by JS -->
-</div>
-
+<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;"></div>
 <script src="{% static 'imaging/js/grayscale.js' %}" defer></script>
 {% endblock %}
