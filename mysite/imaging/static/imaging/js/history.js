@@ -28,7 +28,7 @@ async function loadHistory() {
 document.getElementById("clrBtn").addEventListener("click", async () => {
     if (!confirm("Clear all history?")) return;
     const r = await fetch("/api/history/", {
-        ...fetchOpts,                      // adds credentials: "same-origin"
+        ...fetchOpts,  // adds credentials: "same-origin"
         method: "DELETE",
         headers: { "X-CSRFToken": getCSRF() },
     });
