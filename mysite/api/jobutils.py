@@ -3,20 +3,28 @@
 Utility helpers for enqueueing jobs, polling results and maintaining history.
 """
 from __future__ import annotations
-import io, os, shutil, time, uuid, base64, json
+
+import io, shutil, time, uuid, base64
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 from scipy.signal import convolve2d
 
-JOBS_ROOT = Path(__file__).resolve().parent / "jobs"
+# --------------------------------------------------------------------------- #
+# Globals & limits
+# --------------------------------------------------------------------------- #
+JOBS_ROOT            = Path(__file__).resolve().parent / "jobs"
 JOBS_ROOT.mkdir(exist_ok=True)
-HISTORY_LIMIT = 10  # keep at most N finished jobs
+MAX_WIDTH            = 1920
+MAX_HEIGHT           = 1080
+MAX_VIDEO_BYTES      = 1_073_741_824       # 1 GiB
+HISTORY_LIMIT_IMG    = 10
+HISTORY_LIMIT_VIDEO  = 1
 
 
 # --------------------------------------------------------------------------- #
-# Small helpers
+# Helpers
 # --------------------------------------------------------------------------- #
 def _save_uploaded(uploaded_file, dst: Path) -> None:
     """Stream‑save a Django *UploadedFile*."""
@@ -27,6 +35,15 @@ def _save_uploaded(uploaded_file, dst: Path) -> None:
         uploaded_file.seek(0)
     except Exception:
         pass
+
+
+def _resize_image_if_needed(path: Path) -> None:
+    with Image.open(path) as im:
+        w, h = im.size
+        if w <= MAX_WIDTH and h <= MAX_HEIGHT:
+            return
+        im.thumbnail((MAX_WIDTH, MAX_HEIGHT), Image.LANCZOS)
+        im.save(path, format="JPEG", quality=100)
 
 
 def wait_for_file(path: Path, timeout: int = 45) -> None:
@@ -55,30 +72,61 @@ def _create_job(prefix: str) -> Path:
     return job
 
 
-def enqueue_filter_job(uploaded_file, coeffs, factor: int) -> Path:
-    job = _create_job("job")
+def enqueue_grayscale_job(uploaded_file):
+    job = _create_job("job_img")
     _save_uploaded(uploaded_file, job / "in.jpg")
+    _resize_image_if_needed(job / "in.jpg")
+    (job / "kernel.txt").write_text("grayscale")
+    return job
+
+
+def enqueue_filter_job(uploaded_file, coeffs, factor: int):
+    job = _create_job("job_img")
+    _save_uploaded(uploaded_file, job / "in.jpg")
+    _resize_image_if_needed(job / "in.jpg")
     (job / "kernel.txt").write_text("filter")
     (job / "factor.txt").write_text(str(factor))
     (job / "filter.txt").write_text(" ".join(map(str, coeffs)))
     return job
 
 
-def enqueue_grayscale_job(uploaded_file) -> Path:
-    job = _create_job("job")
-    _save_uploaded(uploaded_file, job / "in.jpg")
-    (job / "kernel.txt").write_text("grayscale")
+def enqueue_video_grayscale_job(uploaded_file):
+    if uploaded_file.size > MAX_VIDEO_BYTES:
+        raise ValueError("Video exceeds 1 GiB limit")
+    job = _create_job("job_vid")
+    _save_uploaded(uploaded_file, job / "in.mp4")
+    (job / "kernel.txt").write_text("grayscale_video")
+    return job
+
+
+def enqueue_video_filter_job(uploaded_file, coeffs, factor: int):
+    if uploaded_file.size > MAX_VIDEO_BYTES:
+        raise ValueError("Video exceeds 1 GiB limit")
+    job = _create_job("job_vid")
+    _save_uploaded(uploaded_file, job / "in.mp4")
+    (job / "kernel.txt").write_text("filter_video")
+    (job / "factor.txt").write_text(str(factor))
+    (job / "filter.txt").write_text(" ".join(map(str, coeffs)))
     return job
 
 
 # --------------------------------------------------------------------------- #
-# Optional software reference
+# Optional SciPy reference (images only)
 # --------------------------------------------------------------------------- #
-def _run_conv(img_rgb, k) -> np.ndarray:
+def _run_conv(img_rgb, k):
     out = np.zeros_like(img_rgb)
     for c in range(3):
         out[..., c] = convolve2d(img_rgb[..., c], k, mode="same", boundary="symm")
     return out.clip(0, 255).astype(np.uint8)
+
+
+def run_scipy_gray(img_file):
+    img_rgb = np.array(Image.open(img_file).convert("RGB"))
+    gray = (img_rgb @ np.array([[0.299, 0.587, 0.114]]).T).astype(np.uint8)
+    img = np.repeat(gray, 3, axis=2)
+    buf, t0 = io.BytesIO(), time.perf_counter()
+    Image.fromarray(img).save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode(), time.perf_counter() - t0
 
 
 def run_scipy_filter(img_file, coeffs, factor: int):
@@ -87,17 +135,6 @@ def run_scipy_filter(img_file, coeffs, factor: int):
     t0 = time.perf_counter()
     out = _run_conv(img_rgb, k)
     return _encode(out), time.perf_counter() - t0
-
-
-def run_scipy_gray(img_file):
-    img_rgb = np.array(Image.open(img_file).convert("RGB"))
-    # ITU BT.601 luma weights
-    k = np.array([[0.299, 0.587, 0.114]])
-    gray = (img_rgb @ k.T).astype(np.uint8)
-    img = np.repeat(gray, 3, axis=2)          # 3‑channel for fair comparison
-    buf, t0 = io.BytesIO(), time.perf_counter()
-    Image.fromarray(img).save(buf, format="JPEG")
-    return base64.b64encode(buf.getvalue()).decode(), time.perf_counter() - t0
 
 
 # --------------------------------------------------------------------------- #
@@ -111,8 +148,13 @@ def _encode(arr: np.ndarray) -> str:
 
 
 def list_history() -> list[dict]:
-    jobs = sorted([p for p in JOBS_ROOT.iterdir() if (p / "done.txt").exists()],
-                  key=lambda p: p.stat().st_mtime, reverse=True)[:HISTORY_LIMIT]
+    jobs = sorted(
+        [p for p in JOBS_ROOT.iterdir()
+         if (p / "done.txt").exists() and not p.name.startswith("job_vid")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )[:HISTORY_LIMIT_IMG]
+
     out: list[dict] = []
     for j in jobs:
         kind = (j / "kernel.txt").read_text().strip()
@@ -130,8 +172,23 @@ def list_history() -> list[dict]:
     return out
 
 
-def trim_history(limit: int = HISTORY_LIMIT) -> None:
-    jobs = sorted([p for p in JOBS_ROOT.iterdir() if (p / "done.txt").exists()],
-                  key=lambda p: p.stat().st_mtime, reverse=True)
+def trim_image_history(limit: int = HISTORY_LIMIT_IMG):
+    jobs = sorted(
+        [p for p in JOBS_ROOT.iterdir()
+         if (p / "done.txt").exists() and not p.name.startswith("job_vid")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    for p in jobs[limit:]:
+        shutil.rmtree(p, ignore_errors=True)
+
+
+def trim_video_history(limit: int = HISTORY_LIMIT_VIDEO):
+    jobs = sorted(
+        [p for p in JOBS_ROOT.iterdir()
+         if (p / "done.txt").exists() and p.name.startswith("job_vid")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
     for p in jobs[limit:]:
         shutil.rmtree(p, ignore_errors=True)

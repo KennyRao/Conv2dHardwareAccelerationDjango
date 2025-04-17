@@ -25,7 +25,7 @@ templateSel.addEventListener("change", () => {
     }
 });
 
-document.getElementById("fltForm").addEventListener("submit", async (ev) => {
+document.getElementById("vfForm").addEventListener("submit", async ev => {
     ev.preventDefault();
     const form = ev.target;
     const coeffs = form.filter.value.trim().split(/\s+/);
@@ -35,35 +35,31 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
     }
 
     const fd = new FormData(form);
-    if (form.use_scipy.checked) fd.append("use_scipy", "on");
 
     try {
         spinner.style.display = "block";
-        const r = await fetch("/api/filter/", {
+        const r = await fetch("/api/video/filter/", {
             ...fetchOpts,
             method: "POST",
             body: fd,
             headers: { "X-CSRFToken": getCSRF() },
         });
-        if (!r.ok) throw new Error("Upload failed");
+        if (!r.ok) {
+            const msg = await r.json().catch(() => ({}));
+            throw new Error(msg.error || "Upload failed");
+        }
         const d = await r.json();
-
         const wrap = document.getElementById("results");
         wrap.innerHTML = ""; wrap.style.display = "flex";
-        const card = (t, src) => `
-      <div class="col">
-        <div class="card h-100 shadow-sm">
-          <img src="${src}" class="card-img-top">
-          <div class="card-body py-2"><h6 class="card-title mb-0">${t}</h6></div>
-        </div>
-      </div>`;
-        wrap.insertAdjacentHTML("beforeend", card("Original",
-            URL.createObjectURL(form.image.files[0])));
-        wrap.insertAdjacentHTML("beforeend", card(`Hardware (${d.hw_time})`,
-            `data:image/jpeg;base64,${d.hw_image}`));
-        if (d.sw_image)
-            wrap.insertAdjacentHTML("beforeend", card(`SciPy (${d.sw_time})`,
-                `data:image/jpeg;base64,${d.sw_image}`));
-    } catch (e) { alert(e.message); }
+        wrap.insertAdjacentHTML("beforeend", `
+            <div class="col">
+                <div class="card h-100 shadow-sm">
+                <video src="${d.video_url}" controls class="card-img-top"></video>
+                <div class="card-body py-2"><h6 class="card-title mb-0">
+                    Hardware (${d.hw_time})
+                </h6></div>
+                </div>
+            </div>`);
+    } catch (err) { alert(err.message); }
     finally { spinner.style.display = "none"; }
 });

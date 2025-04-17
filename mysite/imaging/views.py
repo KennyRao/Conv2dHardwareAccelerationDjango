@@ -12,3 +12,9 @@ class FilterPageView(TemplateView):
 
 class HistoryPageView(TemplateView):
     template_name = "imaging/history.html"
+
+class VideoGrayscalePageView(TemplateView):
+    template_name = "imaging/video_grayscale.html"
+
+class VideoFilterPageView(TemplateView):
+    template_name = "imaging/video_filter.html"

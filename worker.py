@@ -1,18 +1,19 @@
 # worker.py
 """
 Background FPGA worker – continuously polls *jobs* directory, applies the
-requested accelerator (grayscale / 3×3 filter), writes JPEG result plus a
+requested accelerator (grayscale / 3×3 filter), writes result plus a
 'done.txt' *and* a 'hw_time.txt' containing runtime in milliseconds.
 """
-import os
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 from pynq import Overlay, allocate, DefaultIP
 
 JOBS_DIR = Path("/home/xilinx/f_c_a_api/mysite/api/jobs")
+MAX_W, MAX_H = 1920, 1080
 current_overlay = current_ip = current_dma = loaded_kernel = None
 
 OVERLAY_PATHS = {
@@ -27,20 +28,20 @@ OVERLAY_PATHS = {
 class FilterKernel(DefaultIP):
     bindto = ["xilinx.com:hls:filter_kernel:1.0"]
 
-    def __init__(self, description):
-        super().__init__(description=description)
-        self.width_addr   = self.register_map.image_width.address
-        self.height_addr  = self.register_map.image_height.address
-        self.factor_addr  = self.register_map.kernel_factor.address
-        self.kernel_addr  = 0x40  # start of 9×int32 kernel matrix
+    def __init__(self, desc):
+        super().__init__(description=desc)
+        rm = self.register_map
+        self.width_addr  = rm.image_width.address
+        self.height_addr = rm.image_height.address
+        self.factor_addr = rm.kernel_factor.address
+        self.kernel_addr = 0x40
 
-    # Convenience properties
-    width  = property(lambda self: self.read(self.width_addr),
-                      lambda self, v: self.write(self.width_addr, v))
-    height = property(lambda self: self.read(self.height_addr),
-                      lambda self, v: self.write(self.height_addr, v))
-    factor = property(lambda self: self.read(self.factor_addr),
-                      lambda self, v: self.write(self.factor_addr, v))
+    width  = property(lambda s: s.read(s.width_addr),
+                      lambda s, v: s.write(s.width_addr, v))
+    height = property(lambda s: s.read(s.height_addr),
+                      lambda s, v: s.write(s.height_addr, v))
+    factor = property(lambda s: s.read(s.factor_addr),
+                      lambda s, v: s.write(s.factor_addr, v))
 
     @property
     def kernel(self):
@@ -49,7 +50,7 @@ class FilterKernel(DefaultIP):
 
     @kernel.setter
     def kernel(self, matrix):
-        flat = np.array(matrix, dtype=np.int32).flatten()
+        flat = np.array(matrix, dtype=np.int32).ravel()
         if flat.size != 9:
             raise ValueError("Kernel must be 3×3")
         for i, val in enumerate(flat):
@@ -65,15 +66,12 @@ def load_overlay(kind: str):
     if loaded_kernel == kind:
         return
 
-    path = OVERLAY_PATHS[kind]
-    current_overlay = Overlay(path)
-
+    current_overlay = Overlay(OVERLAY_PATHS[kind.removesuffix('_video')])
     match kind:
         case "grayscale":
             current_ip = current_overlay.grayscale_kernel_0
         case "filter":
             current_ip = current_overlay.filter_kernel_0
-
     current_dma = current_overlay.axi_dma_0
     loaded_kernel = kind
 
@@ -87,77 +85,106 @@ def cfg_grayscale(img):
     current_ip.write(0x18, h)
 
 
-def cfg_filter(img, job_path: Path):
-    factor = int((job_path / "factor.txt").read_text())
-    values = list(map(int, (job_path / "filter.txt").read_text().split()))
-    kernel = np.array(values, dtype=np.int32).reshape(3, 3)
-
-    h, w, _ = img.shape
+def cfg_filter(arr, job):
+    h, w = arr.shape[:2]
     current_ip.height = h
     current_ip.width  = w
-    current_ip.factor = factor
-    current_ip.kernel = kernel
+    current_ip.factor = int((job / "factor.txt").read_text())
+    k = np.fromstring((job / "filter.txt").read_text(), sep=' ',
+                      dtype=np.int32).reshape(3, 3)
+    current_ip.kernel = k
+
+
+# --------------------------------------------------------- frame •> FPGA
+def process_frame(rgb, cfg_fun):
+    comb = ((rgb[..., 0].astype(np.uint32) << 16) |
+            (rgb[..., 1].astype(np.uint32) << 8)  |
+             rgb[..., 2].astype(np.uint32))
+
+    in_b  = allocate(comb.shape, dtype=np.uint32)
+    out_b = allocate(comb.shape, dtype=np.uint32)
+    in_b[:] = comb
+
+    cfg_fun(rgb)
+    current_ip.write(0x00, 1)
+    current_dma.sendchannel.transfer(in_b)
+    current_dma.recvchannel.transfer(out_b)
+    current_dma.sendchannel.wait()
+    current_dma.recvchannel.wait()
+
+    r = (out_b >> 16) & 0xFF
+    g = (out_b >>  8) & 0xFF
+    b =  out_b        & 0xFF
+    out = np.stack((r, g, b), -1).astype(np.uint8)
+
+    in_b.freebuffer(); out_b.freebuffer()
+    return out
+
+
+# --------------------------------------------------- handle single‑image job
+def handle_image(job, kind):
+    load_overlay(kind)
+    img = np.array(Image.open(job / "in.jpg"))
+    cfg  = cfg_grayscale if kind == "grayscale" else lambda a: cfg_filter(a, job)
+
+    t0 = time.perf_counter()
+    res = process_frame(img, cfg)
+    (job / "hw_time.txt").write_text(f"{(time.perf_counter()-t0)*1e3:.2f} ms")
+    Image.fromarray(res).save(job / "out.jpg")
+    (job / "done.txt").write_text("done")
+    print("✓", job.name)
+
+
+# --------------------------------------------------- handle video jobs
+def handle_video(job, kind):
+    load_overlay(kind)
+    cap = cv2.VideoCapture(str(job / "in.mp4"))
+    if not cap.isOpened():
+        raise RuntimeError("Video open failed")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    scale = max(w/MAX_W, h/MAX_H, 1.0)
+    ow, oh = int(w/scale), int(h/scale)
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    vw = cv2.VideoWriter(str(job / "out.mp4"), fourcc, fps, (ow, oh))
+    cfg = cfg_grayscale if kind == "grayscale_video" else lambda a: cfg_filter(a, job)
+
+    count, t0 = 0, time.perf_counter()
+    while True:
+        ok, frm = cap.read()
+        if not ok:
+            break
+        if scale > 1.0:
+            frm = cv2.resize(frm, (ow, oh), interpolation=cv2.INTER_AREA)
+        rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
+        prc = process_frame(rgb, cfg)
+        vw.write(cv2.cvtColor(prc, cv2.COLOR_RGB2BGR))
+        count += 1
+
+    cap.release(); vw.release()
+    (job / "hw_time.txt").write_text(f"{(time.perf_counter()-t0)*1e3:.2f} ms ({count}f)")
+    (job / "done.txt").write_text("done")
+    print("✓", job.name, f"({count} frames)")
 
 
 # --------------------------------------------------------------------------- #
 # Main loop
 # --------------------------------------------------------------------------- #
 while True:
-    for job_name in os.listdir(JOBS_DIR):
-        job_path = JOBS_DIR / job_name
-        done_flag = job_path / "done.txt"
-        if done_flag.exists():
-            continue  # already processed
-
+    for p in Path(JOBS_DIR).iterdir():
+        if (p / "done.txt").exists():
+            continue
         try:
-            kernel = (job_path / "kernel.txt").read_text().strip()
-            load_overlay(kernel)
-            img = np.array(Image.open(job_path / "in.jpg"))
-            combined = (
-                ((img[:, :, 0].astype(np.uint32) << 16) |
-                 (img[:, :, 1].astype(np.uint32) << 8) |
-                 img[:, :, 2].astype(np.uint32))
-            )
-
-            in_buf  = allocate(combined.shape, dtype=np.uint32)
-            out_buf = allocate(combined.shape, dtype=np.uint32)
-            in_buf[:] = combined
-
-            # Kernel‑specific register setup
-            if kernel == "grayscale":
-                cfg_grayscale(img)
+            k = (p / "kernel.txt").read_text().strip()
+            if k in ("grayscale", "filter"):
+                handle_image(p, k)
+            elif k in ("grayscale_video", "filter_video"):
+                handle_video(p, k)
             else:
-                cfg_filter(img, job_path)
-
-            # ----------------------------------------------------------------
-            # Measure hardware time
-            # ----------------------------------------------------------------
-            t0 = time.perf_counter()
-            current_ip.write(0x00, 1)          # start
-            current_dma.sendchannel.transfer(in_buf)
-            current_dma.recvchannel.transfer(out_buf)
-            current_dma.sendchannel.wait()
-            current_dma.recvchannel.wait()
-            hw_ms = (time.perf_counter() - t0) * 1_000
-            (job_path / "hw_time.txt").write_text(f"{hw_ms:.2f} ms")
-
-            # ----------------------------------------------------------------
-            # Convert 0xRRGGBB back to 3‑channel uint8 image
-            # ----------------------------------------------------------------
-            r = (out_buf >> 16) & 0xFF
-            g = (out_buf >> 8) & 0xFF
-            b = out_buf & 0xFF
-            result = np.stack((r, g, b), axis=-1).astype(np.uint8)
-            Image.fromarray(result).save(job_path / "out.jpg")
-
-            in_buf.freebuffer()
-            out_buf.freebuffer()
-
-            done_flag.write_text("done")
-            print("✓", job_name)
-
-        except Exception as exc:
-            print("Worker error:", exc)
-
-    # Let the worker looks for new jobs roughly twice per second
+                print("Unknown kernel:", k)
+        except Exception as e:
+            print("Worker error:", e)
     time.sleep(0.5)

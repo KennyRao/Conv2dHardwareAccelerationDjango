@@ -10,18 +10,23 @@
 </head>
 <body class="bg-light">
 
+<div id="spinner" class="spinner-border text-primary"
+     style="display:none;position:fixed;top:50%;left:50%;
+            transform:translate(-50%,-50%);z-index:1055" role="status">
+  <span class="visually-hidden">Loading...</span>
+</div>
+
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
   <div class="container-fluid">
     <a class="navbar-brand fw-bold" href="{% url 'home' %}">PYNQ Lab</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
-            data-bs-target="#navBar" aria-controls="navBar"
-            aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
-    </button>
+            data-bs-target="#navBar"><span class="navbar-toggler-icon"></span></button>
     <div id="navBar" class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
-        <li class="nav-item"><a class="nav-link" href="{% url 'grayscale_page' %}">Grayscale</a></li>
-        <li class="nav-item"><a class="nav-link" href="{% url 'filter_page' %}">Filter</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'grayscale_page' %}">Grayscale (Image)</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'filter_page' %}">Filter (Image)</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'video_grayscale_page' %}">Grayscale (Video)</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'video_filter_page' %}">Filter (Video)</a></li>
         <li class="nav-item"><a class="nav-link" href="{% url 'history_page' %}">History</a></li>
       </ul>
     </div>

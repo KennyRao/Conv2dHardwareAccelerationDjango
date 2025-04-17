@@ -1,0 +1,15 @@
+{% extends "imaging/base.html" %}
+{% comment %} mysite/imaging/templates/imaging/video_grayscale.html {% endcomment %}
+{% load static %}
+{% block content %}
+<h2>Hardware Grayscale — Video</h2>
+<form id="vgForm" class="mb-3">
+  {% csrf_token %}
+  <input type="file" name="video" accept="video/*" class="form-control mb-2" required>
+  <div class="form-text mb-2">Max 1920×1080, ≤ 1 GiB.</div>
+  <button class="btn btn-success">Upload</button>
+</form>
+
+<div id="results" class="row row-cols-1 g-3" style="display:none;"></div>
+<script type="module" src="{% static 'imaging/js/video_grayscale.js' %}"></script>
+{% endblock %}
