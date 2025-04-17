@@ -4,9 +4,21 @@
 {% block content %}
 <h2>Job History</h2>
 <button id="clrBtn" class="btn btn-danger mb-2">Clear history</button>
+
 <table class="table table-striped">
-  <thead><tr><th>Time</th><th>Kind</th><th>Kernel</th><th>Factor</th><th>HW time</th><th>Preview</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Kind</th>
+      <th>Kernel</th>
+      <th>Factor</th>
+      <th>HW time</th>
+      <th>Preview</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
   <tbody id="history-body"></tbody>
 </table>
+
 <script type="module" src="{% static 'imaging/js/history.js' %}"></script>
 {% endblock %}

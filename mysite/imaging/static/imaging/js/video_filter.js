@@ -4,7 +4,7 @@ import { getCSRF, fetchOpts } from "./csrf.js";
 const templateSel = document.getElementById("templateSelect");
 const filtInput = document.getElementById("filterInput");
 const factorInput = document.querySelector('input[name="factor"]');
-const spinner = document.getElementById("spinner");
+const spinner = document.getElementById("spinnerOverlay");
 
 const presets = {
     "": { k: "", f: 1 },

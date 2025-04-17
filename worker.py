@@ -1,9 +1,8 @@
 # worker.py
 """
-Background FPGA worker – continuously polls *jobs* directory, applies the
-requested accelerator (grayscale / 3×3 filter), writes result plus a
-'done.txt' *and* a 'hw_time.txt' containing runtime in milliseconds.
+Background FPGA worker – images & videos.
 """
+
 import time
 from pathlib import Path
 
@@ -65,42 +64,21 @@ def load_overlay(kind: str):
     global current_overlay, current_ip, current_dma, loaded_kernel
     if loaded_kernel == kind:
         return
-
-    current_overlay = Overlay(OVERLAY_PATHS[kind.removesuffix('_video')])
-    match kind:
-        case "grayscale":
-            current_ip = current_overlay.grayscale_kernel_0
-        case "filter":
-            current_ip = current_overlay.filter_kernel_0
-    current_dma = current_overlay.axi_dma_0
-    loaded_kernel = kind
+    current_overlay = Overlay(OVERLAY_PATHS[kind.removesuffix("_video")])
+    current_dma     = current_overlay.axi_dma_0
+    current_ip      = (current_overlay.grayscale_kernel_0
+                       if kind.startswith("grayscale")
+                       else current_overlay.filter_kernel_0)
+    loaded_kernel   = kind
 
 
-# --------------------------------------------------------------------------- #
-# Per‑kernel configuration helpers
-# --------------------------------------------------------------------------- #
-def cfg_grayscale(img):
-    h, w, _ = img.shape
-    current_ip.write(0x10, w)
-    current_ip.write(0x18, h)
-
-
-def cfg_filter(arr, job):
-    h, w = arr.shape[:2]
-    current_ip.height = h
-    current_ip.width  = w
-    current_ip.factor = int((job / "factor.txt").read_text())
-    k = np.fromstring((job / "filter.txt").read_text(), sep=' ',
-                      dtype=np.int32).reshape(3, 3)
-    current_ip.kernel = k
-
-
-# --------------------------------------------------------- frame •> FPGA
-def process_frame(rgb, cfg_fun):
+# ────────────────────────────────────────────────────────────────────────────
+# Per‑frame FPGA helper
+# ────────────────────────────────────────────────────────────────────────────
+def process_frame(rgb: np.ndarray, cfg_fun):
     comb = ((rgb[..., 0].astype(np.uint32) << 16) |
             (rgb[..., 1].astype(np.uint32) << 8)  |
              rgb[..., 2].astype(np.uint32))
-
     in_b  = allocate(comb.shape, dtype=np.uint32)
     out_b = allocate(comb.shape, dtype=np.uint32)
     in_b[:] = comb
@@ -117,15 +95,37 @@ def process_frame(rgb, cfg_fun):
     b =  out_b        & 0xFF
     out = np.stack((r, g, b), -1).astype(np.uint8)
 
-    in_b.freebuffer(); out_b.freebuffer()
+    in_b.freebuffer()
+    out_b.freebuffer()
     return out
 
 
-# --------------------------------------------------- handle single‑image job
+# ────────────────────────────────────────────────────────────────────────────
+# Config helpers
+# ────────────────────────────────────────────────────────────────────────────
+def cfg_grayscale(arr):  # arr: RGB
+    h, w = arr.shape[:2]
+    current_ip.write(0x10, w)
+    current_ip.write(0x18, h)
+
+
+def cfg_filter(arr, job):
+    h, w = arr.shape[:2]
+    current_ip.height = h
+    current_ip.width  = w
+    current_ip.factor = int((job / "factor.txt").read_text())
+    k = np.fromstring((job / "filter.txt").read_text(), sep=' ',
+                      dtype=np.int32).reshape(3, 3)
+    current_ip.kernel = k
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Image job
+# ────────────────────────────────────────────────────────────────────────────
 def handle_image(job, kind):
     load_overlay(kind)
     img = np.array(Image.open(job / "in.jpg"))
-    cfg  = cfg_grayscale if kind == "grayscale" else lambda a: cfg_filter(a, job)
+    cfg = cfg_grayscale if kind == "grayscale" else lambda a: cfg_filter(a, job)
 
     t0 = time.perf_counter()
     res = process_frame(img, cfg)
@@ -136,41 +136,49 @@ def handle_image(job, kind):
     print("✓", job.name)
 
 
-# --------------------------------------------------- handle video jobs
+# ────────────────────────────────────────────────────────────────────────────
+# Video job
+# ────────────────────────────────────────────────────────────────────────────
 def handle_video(job, kind):
     load_overlay(kind)
     cap = cv2.VideoCapture(str(job / "in.mp4"))
     if not cap.isOpened():
         raise RuntimeError("Video open failed")
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    scale = max(w/MAX_W, h/MAX_H, 1.0)
-    ow, oh = int(w/scale), int(h/scale)
+    fps  = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    w    = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h    = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    scl  = max(w/MAX_W, h/MAX_H, 1.0)
+    ow, oh = int(w/scl), int(h/scl)
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    vw = cv2.VideoWriter(str(job / "out.mp4"), fourcc, fps, (ow, oh))
+    vw = cv2.VideoWriter(str(job / "out.mp4"),
+                         cv2.VideoWriter_fourcc(*"mp4v"), fps, (ow, oh))
     cfg = cfg_grayscale if kind == "grayscale_video" else lambda a: cfg_filter(a, job)
 
-    count, t0 = 0, time.perf_counter()
+    first_snap = None
+    frames = 0
+    t0 = time.perf_counter()
     while True:
         ok, frm = cap.read()
         if not ok:
             break
-        if scale > 1.0:
-            frm = cv2.resize(frm, (ow, oh), interpolation=cv2.INTER_AREA)
+        if scl > 1.0:
+            frm = cv2.resize(frm, (ow, oh), cv2.INTER_AREA)
         rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
-        prc = process_frame(rgb, cfg)
-        vw.write(cv2.cvtColor(prc, cv2.COLOR_RGB2BGR))
-        count += 1
+        out = process_frame(rgb, cfg)
+        if first_snap is None:
+            first_snap = out.copy()
+        vw.write(cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
+        frames += 1
 
     t1 = time.perf_counter()
     cap.release()
     vw.release()
-    (job / "hw_time.txt").write_text(f"{(t1-t0)*1e3:.2f} ms ({count}f)")
+    if first_snap is not None:
+        Image.fromarray(first_snap).save(job / "out.jpg")  # snapshot
+    (job / "hw_time.txt").write_text(f"{(t1-t0)*1e3:.2f} ms ({frames}f)")
     (job / "done.txt").write_text("done")
-    print("✓", job.name, f"({count} frames)")
+    print("✓", job.name, f"({frames} frames)")
 
 
 # --------------------------------------------------------------------------- #

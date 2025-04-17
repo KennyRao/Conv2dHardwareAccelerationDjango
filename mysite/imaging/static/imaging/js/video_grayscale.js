@@ -1,7 +1,7 @@
 // mysite/imaging/static/imaging/js/video_grayscale.js
 import { getCSRF, fetchOpts } from "./csrf.js";
 
-const spinner = document.getElementById("spinner");
+const spinner = document.getElementById("spinnerOverlay");
 
 document.getElementById("vgForm").addEventListener("submit", async e => {
     e.preventDefault();

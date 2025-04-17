@@ -2,8 +2,8 @@
 """
 Utility helpers for enqueueing jobs, polling results and maintaining history.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 import io, shutil, time, uuid, base64
 from pathlib import Path
 
@@ -60,6 +60,12 @@ def read_time(job: Path) -> str:
         return (job / "hw_time.txt").read_text().strip()
     except FileNotFoundError:
         return "N/A"
+
+
+def _encode(arr: np.ndarray) -> str:
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 # --------------------------------------------------------------------------- #
@@ -140,55 +146,51 @@ def run_scipy_filter(img_file, coeffs, factor: int):
 # --------------------------------------------------------------------------- #
 # History helpers
 # --------------------------------------------------------------------------- #
-def _encode(arr: np.ndarray) -> str:
-    """JPEG→base64 helper."""
-    buf = io.BytesIO()
-    Image.fromarray(arr).save(buf, format="JPEG")
-    return base64.b64encode(buf.getvalue()).decode()
-
-
 def list_history() -> list[dict]:
+    """Return unified (image + video) job list, newest first."""
     jobs = sorted(
-        [p for p in JOBS_ROOT.iterdir()
-         if (p / "done.txt").exists() and not p.name.startswith("job_vid")],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )[:HISTORY_LIMIT_IMG]
+        [p for p in JOBS_ROOT.iterdir() if (p / "done.txt").exists()],
+        key=lambda p: p.stat().st_mtime, reverse=True
+    )
 
     out: list[dict] = []
     for j in jobs:
         kind = (j / "kernel.txt").read_text().strip()
+        is_video = kind.endswith("_video")
         meta = {
-            "id": j.name,
-            "kind": kind,
-            "time": read_time(j),
+            "id":        j.name,
+            "kind":      kind,
+            "is_video":  is_video,
+            "time":      read_time(j),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
-            "image": _encode(np.array(Image.open(j / "out.jpg"))),
         }
-        if kind == "filter":
-            meta["factor"] = (j / "factor.txt").read_text().strip()
-            meta["kernel"] = (j / "filter.txt").read_text().strip()
+
+        if is_video:
+            # snapshot saved by worker as out.jpg
+            snap = j / "out.jpg"
+            meta["image"] = _encode(np.array(Image.open(snap))) if snap.exists() else ""
+            meta["video_url"] = f"/api/video/result/{j.name}/"
+        else:
+            meta["image"] = _encode(np.array(Image.open(j / "out.jpg")))
+            if kind == "filter":
+                meta["factor"] = (j / "factor.txt").read_text().strip()
+                meta["kernel"] = (j / "filter.txt").read_text().strip()
+
         out.append(meta)
     return out
 
 
 def trim_image_history(limit: int = HISTORY_LIMIT_IMG):
-    jobs = sorted(
-        [p for p in JOBS_ROOT.iterdir()
-         if (p / "done.txt").exists() and not p.name.startswith("job_vid")],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-    for p in jobs[limit:]:
+    imgs = sorted([p for p in JOBS_ROOT.iterdir()
+                   if p.name.startswith("job_img") and (p / "done.txt").exists()],
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in imgs[limit:]:
         shutil.rmtree(p, ignore_errors=True)
 
 
 def trim_video_history(limit: int = HISTORY_LIMIT_VIDEO):
-    jobs = sorted(
-        [p for p in JOBS_ROOT.iterdir()
-         if (p / "done.txt").exists() and p.name.startswith("job_vid")],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-    for p in jobs[limit:]:
+    vids = sorted([p for p in JOBS_ROOT.iterdir()
+                   if p.name.startswith("job_vid") and (p / "done.txt").exists()],
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in vids[limit:]:
         shutil.rmtree(p, ignore_errors=True)

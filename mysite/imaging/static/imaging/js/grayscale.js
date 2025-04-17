@@ -1,7 +1,7 @@
 // mysite/imaging/static/imaging/js/grayscale.js
 import { getCSRF, fetchOpts } from "./csrf.js";
 
-const spinner = document.getElementById("spinner");
+const spinner = document.getElementById("spinnerOverlay");
 
 document.getElementById("gsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
