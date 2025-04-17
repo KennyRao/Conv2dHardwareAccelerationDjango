@@ -9,6 +9,7 @@ document.getElementById("gsForm").addEventListener("submit", async (e) => {
 
     const r = await fetch("/api/grayscale/", {
         ...fetchOpts,
+        method: "POST",
         body: fd,
         headers: { "X-CSRFToken": getCSRF() },
     });

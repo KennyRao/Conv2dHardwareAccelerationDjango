@@ -37,6 +37,7 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
 
     const resp = await fetch("/api/filter/", {
         ...fetchOpts,
+        method: "POST",
         body: fd,
         headers: { "X-CSRFToken": getCSRF() },
     });
