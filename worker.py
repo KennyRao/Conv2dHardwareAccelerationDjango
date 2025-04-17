@@ -85,10 +85,14 @@ def process_frame(rgb: np.ndarray, cfg_fun):
 
     cfg_fun(rgb)
     current_ip.write(0x00, 1)
+    t0 = time.perf_counter()
     current_dma.sendchannel.transfer(in_b)
     current_dma.recvchannel.transfer(out_b)
     current_dma.sendchannel.wait()
     current_dma.recvchannel.wait()
+    t1 = time.perf_counter()
+    
+    deltaT = (t1 - t0) * 1000
 
     r = (out_b >> 16) & 0xFF
     g = (out_b >>  8) & 0xFF
@@ -97,7 +101,7 @@ def process_frame(rgb: np.ndarray, cfg_fun):
 
     in_b.freebuffer()
     out_b.freebuffer()
-    return out
+    return out, deltaT
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -127,10 +131,8 @@ def handle_image(job, kind):
     img = np.array(Image.open(job / "in.jpg"))
     cfg = cfg_grayscale if kind == "grayscale" else lambda a: cfg_filter(a, job)
 
-    t0 = time.perf_counter()
-    res = process_frame(img, cfg)
-    t1 = time.perf_counter()
-    (job / "hw_time.txt").write_text(f"{(t1-t0)*1e3:.2f} ms")
+    res, deltaT = process_frame(img, cfg)
+    (job / "hw_time.txt").write_text(f"{deltaT:.2f} ms")
     Image.fromarray(res).save(job / "out.jpg")
     (job / "done.txt").write_text("done")
     print("✓", job.name)
@@ -165,7 +167,7 @@ def handle_video(job, kind):
         if scl > 1.0:
             frm = cv2.resize(frm, (ow, oh), cv2.INTER_AREA)
         rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
-        out = process_frame(rgb, cfg)
+        out, deltaT = process_frame(rgb, cfg)
         if first_snap is None:
             first_snap = out.copy()
         vw.write(cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
