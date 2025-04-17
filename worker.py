@@ -129,7 +129,8 @@ def handle_image(job, kind):
 
     t0 = time.perf_counter()
     res = process_frame(img, cfg)
-    (job / "hw_time.txt").write_text(f"{(time.perf_counter()-t0)*1e3:.2f} ms")
+    t1 = time.perf_counter()
+    (job / "hw_time.txt").write_text(f"{(t1-t0)*1e3:.2f} ms")
     Image.fromarray(res).save(job / "out.jpg")
     (job / "done.txt").write_text("done")
     print("✓", job.name)
@@ -164,8 +165,10 @@ def handle_video(job, kind):
         vw.write(cv2.cvtColor(prc, cv2.COLOR_RGB2BGR))
         count += 1
 
-    cap.release(); vw.release()
-    (job / "hw_time.txt").write_text(f"{(time.perf_counter()-t0)*1e3:.2f} ms ({count}f)")
+    t1 = time.perf_counter()
+    cap.release()
+    vw.release()
+    (job / "hw_time.txt").write_text(f"{(t1-t0)*1e3:.2f} ms ({count}f)")
     (job / "done.txt").write_text("done")
     print("✓", job.name, f"({count} frames)")
 
