@@ -10,9 +10,13 @@
   <label class="form-label fw-bold">Choose a template or enter 9 numbers:</label>
   <select id="templateSelect" class="form-select mb-2">
     <option value="">— Select template —</option>
-    <option value="-1 -1 -1 -1 8 -1 -1 -1 -1">Edge Detect</option>
-    <option value="0 -1 0 -1 5 -1 0 -1 0">Sharpen</option>
-    <option value="1 1 1 1 1 1 1 1 1">Blur (÷9)</option>
+    <option value="edge">Edge Detect</option>
+    <option value="sharpen">Sharpen</option>
+    <option value="box">Blur (÷9)</option>
+    <option value="gauss">Gaussian Blur (÷16)</option>
+    <option value="boxstrong">Strong Blur (÷20)</option>
+    <option value="emboss">Emboss</option>
+    <option value="identity">Identity</option>
   </select>
 
   <input id="filterInput" class="form-control mb-2"

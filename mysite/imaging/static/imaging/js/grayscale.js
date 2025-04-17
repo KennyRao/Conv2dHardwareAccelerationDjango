@@ -13,14 +13,23 @@ document.getElementById("gsForm").addEventListener("submit", async (e) => {
         headers: { "X-CSRFToken": getCSRF() },
     });
     if (!r.ok) return alert("Upload failed");
-    const blob = await r.blob();
+    const data = await r.json();
 
     const wrap = document.getElementById("results");
+    wrap.innerHTML = "";
     wrap.style.display = "flex";
-    wrap.innerHTML = `
-    <div class="col">
-      <div class="card"><img src="${URL.createObjectURL(blob)}" class="card-img-top">
-        <div class="card-body"><h5 class="card-title">Hardware</h5></div>
-      </div>
-    </div>`;
+
+    const addCard = (title, src) => {
+        wrap.insertAdjacentHTML("beforeend", `
+      <div class="col"><div class="card h-100 shadow-sm">
+        <img src="${src}" class="card-img-top">
+        <div class="card-body py-2"><h6 class="card-title mb-0">${title}</h6></div>
+      </div></div>`);
+    };
+
+    addCard("Original", URL.createObjectURL(f.image.files[0]));
+    addCard(`Hardware (${data.hw_time})`, `data:image/jpeg;base64,${data.hw_image}`);
+    if (data.sw_image) {
+        addCard(`SciPy (${data.sw_time})`, `data:image/jpeg;base64,${data.sw_image}`);
+    }
 });

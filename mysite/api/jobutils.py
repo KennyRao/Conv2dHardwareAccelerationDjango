@@ -1,16 +1,9 @@
 # mysite/api/jobutils.py
 """
-Utility helpers for enqueueing jobs and polling worker results.
-All functions are intentionally short & self‑contained.
+Utility helpers for enqueueing jobs, polling results and maintaining history.
 """
 from __future__ import annotations
-
-import io
-import os
-import shutil
-import time
-import uuid
-import base64
+import io, os, shutil, time, uuid, base64, json
 from pathlib import Path
 
 import numpy as np
@@ -19,19 +12,19 @@ from scipy.signal import convolve2d
 
 JOBS_ROOT = Path(__file__).resolve().parent / "jobs"
 JOBS_ROOT.mkdir(exist_ok=True)
+HISTORY_LIMIT = 10  # keep at most N finished jobs
 
 
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
 def _save_uploaded(uploaded_file, dst: Path) -> None:
-    """Stream‑save a Django *UploadedFile* to *dst* without reading it all
-    into memory, then rewind the file so callers may reuse it."""
-    with open(dst, "wb") as f:
+    """Stream‑save a Django *UploadedFile*."""
+    with dst.open("wb") as f:
         for chunk in uploaded_file.chunks():
             f.write(chunk)
     try:
-        uploaded_file.seek(0)            # rewind for Pillow / further use
+        uploaded_file.seek(0)
     except Exception:
         pass
 
@@ -45,62 +38,100 @@ def wait_for_file(path: Path, timeout: int = 45) -> None:
         time.sleep(0.4)
 
 
-def read_time(job: Path, fname: str) -> str:
+def read_time(job: Path) -> str:
     try:
-        return (job / fname).read_text().strip()
+        return (job / "hw_time.txt").read_text().strip()
     except FileNotFoundError:
         return "N/A"
-
-
-def cleanup(job: Path) -> None:
-    """Delete the entire job folder tree (best‑effort)."""
-    try:
-        shutil.rmtree(job)
-    except Exception as exc:
-        print("Cleanup warning:", exc)
 
 
 # --------------------------------------------------------------------------- #
 # Job creation helpers
 # --------------------------------------------------------------------------- #
-def enqueue_filter_job(uploaded_file, coeffs, factor: int):
-    """Create a unique job folder and write all control files for *filter*."""
-    job_id = f"job_{uuid.uuid4().hex}"
+def _create_job(prefix: str) -> Path:
+    job_id = f"{prefix}_{uuid.uuid4().hex}"
     job = JOBS_ROOT / job_id
     job.mkdir()
+    return job
 
-    # save the raw RGB image exactly as uploaded
-    in_path = job / "in.jpg"
-    _save_uploaded(uploaded_file, in_path)
 
-    # meta files consumed by the FPGA worker
+def enqueue_filter_job(uploaded_file, coeffs, factor: int) -> Path:
+    job = _create_job("job")
+    _save_uploaded(uploaded_file, job / "in.jpg")
     (job / "kernel.txt").write_text("filter")
     (job / "factor.txt").write_text(str(factor))
-    if coeffs:
-        (job / "filter.txt").write_text(" ".join(map(str, coeffs)))
+    (job / "filter.txt").write_text(" ".join(map(str, coeffs)))
+    return job
 
-    return job_id, job, job / "out.jpg", job / "done.txt"
+
+def enqueue_grayscale_job(uploaded_file) -> Path:
+    job = _create_job("job")
+    _save_uploaded(uploaded_file, job / "in.jpg")
+    (job / "kernel.txt").write_text("grayscale")
+    return job
 
 
 # --------------------------------------------------------------------------- #
-# Optional software reference (SciPy convolution)
+# Optional software reference
 # --------------------------------------------------------------------------- #
-def run_scipy_filter_locally(uploaded_file, coeffs, factor: int):
-    """Pure‑software reference using SciPy (reflect padding)."""
-    img_rgb = np.array(Image.open(uploaded_file).convert("RGB"))
-    k = (
-        np.array(coeffs, dtype=np.int32).reshape(3, 3)
-        if coeffs
-        else np.eye(3)
-    ) / factor
-
-    t0 = time.perf_counter()
+def _run_conv(img_rgb, k) -> np.ndarray:
     out = np.zeros_like(img_rgb)
     for c in range(3):
         out[..., c] = convolve2d(img_rgb[..., c], k, mode="same", boundary="symm")
-    sw_time = time.perf_counter() - t0
+    return out.clip(0, 255).astype(np.uint8)
 
+
+def run_scipy_filter(img_file, coeffs, factor: int):
+    img_rgb = np.array(Image.open(img_file).convert("RGB"))
+    k = np.array(coeffs, dtype=np.int32).reshape(3, 3) / factor
+    t0 = time.perf_counter()
+    out = _run_conv(img_rgb, k)
+    return _encode(out), time.perf_counter() - t0
+
+
+def run_scipy_gray(img_file):
+    img_rgb = np.array(Image.open(img_file).convert("RGB"))
+    # ITU BT.601 luma weights
+    k = np.array([[0.299, 0.587, 0.114]])
+    gray = (img_rgb @ k.T).astype(np.uint8)
+    img = np.repeat(gray, 3, axis=2)          # 3‑channel for fair comparison
+    buf, t0 = io.BytesIO(), time.perf_counter()
+    Image.fromarray(img).save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode(), time.perf_counter() - t0
+
+
+# --------------------------------------------------------------------------- #
+# History helpers
+# --------------------------------------------------------------------------- #
+def _encode(arr: np.ndarray) -> str:
+    """JPEG→base64 helper."""
     buf = io.BytesIO()
-    Image.fromarray(out.clip(0, 255).astype(np.uint8)).save(buf, format="JPEG")
-    sw_b64 = base64.b64encode(buf.getvalue()).decode()
-    return sw_b64, sw_time
+    Image.fromarray(arr).save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def list_history() -> list[dict]:
+    jobs = sorted([p for p in JOBS_ROOT.iterdir() if (p / "done.txt").exists()],
+                  key=lambda p: p.stat().st_mtime, reverse=True)[:HISTORY_LIMIT]
+    out: list[dict] = []
+    for j in jobs:
+        kind = (j / "kernel.txt").read_text().strip()
+        meta = {
+            "id": j.name,
+            "kind": kind,
+            "time": read_time(j),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
+            "image": _encode(np.array(Image.open(j / "out.jpg"))),
+        }
+        if kind == "filter":
+            meta["factor"] = (j / "factor.txt").read_text().strip()
+            meta["kernel"] = (j / "filter.txt").read_text().strip()
+        out.append(meta)
+    return out
+
+
+def trim_history(limit: int = HISTORY_LIMIT) -> None:
+    jobs = sorted([p for p in JOBS_ROOT.iterdir() if (p / "done.txt").exists()],
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in jobs[limit:]:
+        shutil.rmtree(p, ignore_errors=True)

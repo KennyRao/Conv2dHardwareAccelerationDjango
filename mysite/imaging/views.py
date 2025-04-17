@@ -9,3 +9,6 @@ class GrayscalePageView(TemplateView):
 
 class FilterPageView(TemplateView):
     template_name = "imaging/filter.html"
+
+class HistoryPageView(TemplateView):
+    template_name = "imaging/history.html"

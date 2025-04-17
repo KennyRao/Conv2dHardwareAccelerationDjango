@@ -16,29 +16,21 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path, include
-
-# API views
 from api.views import (
-    TestAPIView,
-    GrayscaleAPIView,
-    FilterAPIView,
     grayscale_test_view,
     filter_test_view,
 )
-
-# Imaging (Bootstrap pages)
 from imaging import urls as img_urls
+from api import urls as api_urls
 
 urlpatterns = [
     # Front‑end pages
     path("", include(img_urls)),
 
-    # JSON / binary APIs
-    path("api/grayscale/", GrayscaleAPIView.as_view(), name="api_grayscale"),
-    path("api/filter/",    FilterAPIView.as_view(),    name="api_filter"),
-    path("test/",          TestAPIView.as_view()),
+    # APIs
+    path("api/", include(api_urls)),
 
-    # Stand‑alone debug pages
+    # Test pages
     path("grayscale_test/", grayscale_test_view),
     path("filter_test/",    filter_test_view),
 ]

@@ -1,12 +1,9 @@
 # mysite/api/views.py
 from __future__ import annotations
-
-import base64
-import io
 import os
-import time
 import uuid
 import shutil
+import base64, io, time
 from pathlib import Path
 
 from django.http import FileResponse, HttpResponse, JsonResponse
@@ -17,14 +14,13 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from PIL import Image
 
 from .jobutils import (
-    enqueue_filter_job,
-    wait_for_file,
-    run_scipy_filter_locally,
-    read_time,
-    cleanup,
+    enqueue_filter_job, enqueue_grayscale_job,
+    wait_for_file, run_scipy_filter, run_scipy_gray,
+    read_time, list_history, trim_history,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+OK_3X3 = lambda lst: len(lst) == 9
 
 
 # --------------------------------------------------------------------------- #
@@ -36,7 +32,7 @@ class TestAPIView(APIView):
 
 
 # --------------------------------------------------------------------------- #
-# Demo *HTML* helpers (optional)
+# Tests (not for final presentation)
 # --------------------------------------------------------------------------- #
 def grayscale_test_view(request):
     return render(request, "grayscale_post_test.html")
@@ -52,44 +48,29 @@ def filter_test_view(request):
 class GrayscaleAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
-    def get(self, request):
-        """Return a static demo image converted to grayscale (software path)."""
-        image_path = BASE_DIR / "test_img" / "input.jpg"
-        img = Image.open(image_path).convert("L")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
-        buf.seek(0)
-        return FileResponse(buf, content_type="image/jpeg")
-
     def post(self, request):
-        uploaded_file = request.FILES.get("image")
-        if not uploaded_file:
+        img = request.FILES.get("image")
+        if not img:
             return Response({"error": "No image uploaded"}, status=400)
 
-        # ------------------------------------------------------------------- #
-        # Create job folder & hand off to FPGA worker
-        # ------------------------------------------------------------------- #
-        job_id = f"job_{uuid.uuid4().hex}"
-        job_path = BASE_DIR / "jobs" / job_id
-        job_path.mkdir(parents=True, exist_ok=True)
-
-        (job_path / "kernel.txt").write_text("grayscale")
-        in_path = job_path / "in.jpg"
-        with open(in_path, "wb") as out:
-            for chunk in uploaded_file.chunks():
-                out.write(chunk)
-
-        done_path = job_path / "done.txt"
-        out_jpg = job_path / "out.jpg"
-
+        job = enqueue_grayscale_job(img)
         try:
-            wait_for_file(done_path)
-            img_bytes = out_jpg.read_bytes()
-            return HttpResponse(img_bytes, content_type="image/jpeg")
+            wait_for_file(job / "done.txt")
         except TimeoutError:
-            return JsonResponse({"error": "Timeout or processing failed"}, status=504)
-        finally:
-            cleanup(job_path)
+            return Response({"error": "Hardware timeout"}, status=504)
+
+        # Assemble JSON (hw + optional sw)
+        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
+        resp = {
+            "hw_image": hw_b64,
+            "hw_time": read_time(job),
+        }
+        if "use_scipy" in request.POST:
+            sw_b64, sw_t = run_scipy_gray(img)
+            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_t*1e3:.2f} ms"})
+
+        trim_history()                      # keep only latest 10
+        return Response(resp)
 
 
 # --------------------------------------------------------------------------- #
@@ -99,43 +80,49 @@ class FilterAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
-        file = request.FILES.get("image")
-        if file is None:
+        img = request.FILES.get("image")
+        raw = request.data.get("filter", "").strip()
+        coeffs = list(map(int, raw.split())) if raw else []
+        factor = int(request.data.get("factor", 1) or 1)
+
+        # Validate
+        if not img:
             return Response({"error": "No image"}, status=400)
+        if not OK_3X3(coeffs):
+            return Response({"error": "Kernel must have 9 integers"}, status=400)
+        if factor <= 0:
+            return Response({"error": "Factor must be positive"}, status=400)
 
-        raw_coeffs = request.data.get("filter", "").strip()
-        coeffs = list(map(int, raw_coeffs.split())) if raw_coeffs else []
-        if coeffs and len(coeffs) != 9:
-            return Response({"error": "Need 9 integers"}, status=400)
-
+        job = enqueue_filter_job(img, coeffs, factor)
         try:
-            factor = int(request.data.get("factor", 1))
-        except ValueError:
-            return Response({"error": "Factor must be int"}, status=400)
-
-        # -------------------------------------------------------------- #
-        # Hand off to FPGA worker
-        # -------------------------------------------------------------- #
-        job_id, job_path, out_path, done_path = enqueue_filter_job(file, coeffs, factor)
-
-        try:
-            wait_for_file(done_path)
+            wait_for_file(job / "done.txt")
         except TimeoutError:
-            cleanup(job_path)
             return Response({"error": "Hardware timeout"}, status=504)
 
-        # -------------------------------------------------------------- #
-        # Assemble response JSON
-        # -------------------------------------------------------------- #
-        hw_b64 = base64.b64encode(out_path.read_bytes()).decode()
+        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
         resp = {
             "hw_image": hw_b64,
-            "hw_time": read_time(job_path, "hw_time.txt"),
+            "hw_time": read_time(job),
         }
-
         if "use_scipy" in request.POST:
-            sw_b64, sw_time = run_scipy_filter_locally(file, coeffs, factor)
-            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_time:.4f} s"})
+            sw_b64, sw = run_scipy_filter(img, coeffs, factor)
+            resp.update({"sw_image": sw_b64, "sw_time": f"{sw*1e3:.2f} ms"})
 
-        cleanup(job_path)
-        return Response(resp, status=200)
+        trim_history()
+        return Response(resp)
+
+
+# --------------------------------------------------------------------------- #
+# Job history
+# --------------------------------------------------------------------------- #
+class HistoryAPIView(APIView):
+    def get(self, _):
+        return Response(list_history())
+
+    def delete(self, _):
+        # wipe all completed jobs
+        for j in (BASE_DIR / "jobs").iterdir():
+            if (j / "done.txt").exists():
+                from shutil import rmtree
+                rmtree(j, ignore_errors=True)
+        return Response({"status": "cleared"})
