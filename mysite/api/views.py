@@ -1,131 +1,192 @@
+# mysite/api/views.py
+from __future__ import annotations
+import shutil
+import base64
+
+from django.http import FileResponse, Http404
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from PIL import Image
-from django.shortcuts import render
-import os
-import io
-from django.http import FileResponse
-import uuid
-import time
-from django.http import HttpResponse
-import shutil
 
-# Create your views here.
+from .jobutils import (
+    enqueue_grayscale_job, enqueue_filter_job,
+    enqueue_video_grayscale_job, enqueue_video_filter_job,
+    wait_for_file, run_scipy_gray, run_scipy_filter,
+    read_time, list_history, trim_image_history, trim_video_history,
+    JOBS_ROOT, MAX_VIDEO_BYTES
+)
+
+OK_3X3 = lambda lst: len(lst) == 9  # noqa: E731
+
+
+# --------------------------------------------------------------------------- #
+# Simple connectivity check
+# --------------------------------------------------------------------------- #
 class TestAPIView(APIView):
     def get(self, request):
         return Response({"message": "Working fine!"})
 
+
+# --------------------------------------------------------------------------- #
+# Tests (not for final presentation)
+# --------------------------------------------------------------------------- #
 def grayscale_test_view(request):
-    return render(request, 'grayscale_post_test.html')
+    return render(request, "grayscale_post_test.html")
+
 
 def filter_test_view(request):
-    return render(request, 'filter_post_test.html')
-    
+    return render(request, "filter_post_test.html")
+
+
+# --------------------------------------------------------------------------- #
+# Grayscale REST endpoint
+# --------------------------------------------------------------------------- #
 class GrayscaleAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
-    def get(self, request):
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        image_path = os.path.join(current_dir, 'test_img', 'input.jpg')
-        image = Image.open(image_path).convert('L') 
-        buffer = io.BytesIO()
-        image.save(buffer, format="JPEG")
-        buffer.seek(0)
-        return FileResponse(buffer, content_type='image/jpeg')
-
     def post(self, request):
-        uploaded_file = request.FILES.get('image')
-        if not uploaded_file:
+        img = request.FILES.get("image")
+        if not img:
             return Response({"error": "No image uploaded"}, status=400)
 
-        job_id = f"job_{uuid.uuid4().hex}"
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        jobs_dir = os.path.join(base_dir, 'jobs')
-        job_path = os.path.join(jobs_dir, job_id)
-        os.makedirs(job_path, exist_ok=True)
-        input_path = os.path.join(job_path, 'in.jpg')
+        job = enqueue_grayscale_job(img)
+        try:
+            wait_for_file(job / "done.txt")
+        except TimeoutError:
+            return Response({"error": "Hardware timeout"}, status=504)
 
-        # Open image using PIL and save to job folder
-        image = Image.open(uploaded_file).save(input_path)
+        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
+        resp = {
+            "hw_image": hw_b64,
+            "hw_time": read_time(job),
+        }
+        if "use_scipy" in request.POST:
+            sw_b64, sw_t = run_scipy_gray(img)
+            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_t*1e3:.2f} ms"})
 
-        with open(os.path.join(job_path, 'kernel.txt'), 'w') as f:
-            f.write('grayscale')
+        trim_image_history()
+        return Response(resp)
 
 
-        done_path = os.path.join(job_path, 'done.txt')
-        output_path = os.path.join(job_path, 'out.jpg')
-
-        for _ in range(30):  # wait up to 30 seconds
-            if os.path.exists(done_path) and os.path.exists(output_path):
-                with open(output_path, 'rb') as f:
-                    image_bytes = f.read()
-
-                # Cleanup job folder after response is prepared
-                try:
-                    shutil.rmtree(job_path)
-                except Exception as cleanup_err:
-                    print(f"Cleanup error (grayscale): {cleanup_err}")
-                return HttpResponse(image_bytes, content_type='image/jpeg')
-            time.sleep(1)
-
-        return JsonResponse({"error": "Timeout or processing failed"}, status=504)
-
+# --------------------------------------------------------------------------- #
+# 3×3 Filter REST endpoint
+# --------------------------------------------------------------------------- #
 class FilterAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request):
-        uploaded_file = request.FILES.get('image')
-        if not uploaded_file:
-            return Response({"error": "No image uploaded"}, status=400)
-        
-        filter_str = request.POST.get('filter')
-        factor_str = request.POST.get('factor')
-        if not filter_str or not factor_str:
-            return Response({"error": "Missing 'filter' or 'factor'"}, status=400)
+        img = request.FILES.get("image")
+        raw = request.data.get("filter", "").strip()
+        coeffs = list(map(int, raw.split())) if raw else []
+        factor = int(request.data.get("factor", 1) or 1)
 
+        # Validate
+        if not img:
+            return Response({"error": "No image"}, status=400)
+        if not OK_3X3(coeffs):
+            return Response({"error": "Kernel must have 9 integers"}, status=400)
+        if factor <= 0:
+            return Response({"error": "Factor must be positive"}, status=400)
+
+        job = enqueue_filter_job(img, coeffs, factor)
         try:
-            filter_values = list(map(int, filter_str.strip().split()))
-            if len(filter_values) != 9:
-                raise ValueError
-            factor = int(factor_str.strip())
-        except ValueError:
-            return Response({"error": "Invalid filter or factor format"}, status=400)
+            wait_for_file(job / "done.txt")
+        except TimeoutError:
+            return Response({"error": "Hardware timeout"}, status=504)
 
-        job_id = f"job_{uuid.uuid4().hex}"
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        jobs_dir = os.path.join(base_dir, 'jobs')
-        job_path = os.path.join(jobs_dir, job_id)
-        os.makedirs(job_path, exist_ok=True)
-        input_path = os.path.join(job_path, 'in.jpg')
+        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
+        resp = {
+            "hw_image": hw_b64,
+            "hw_time": read_time(job),
+        }
+        if "use_scipy" in request.POST:
+            sw_b64, sw_t = run_scipy_filter(img, coeffs, factor)
+            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_t*1e3:.2f} ms"})
 
-        # Open image using PIL and save to job folder
-        image = Image.open(uploaded_file).save(input_path)
+        trim_image_history()
+        return Response(resp)
 
-        with open(os.path.join(job_path, 'kernel.txt'), 'w') as f:
-            f.write('filter')
 
-        with open(os.path.join(job_path, 'filter.txt'), 'w') as f:
-            f.write(filter_str.strip())
+# -------------------------------------------------------------- video: gray
+class VideoGrayscaleAPIView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
 
-        with open(os.path.join(job_path, 'factor.txt'), 'w') as f:
-            f.write(str(factor))
+    def post(self, request):
+        vid = request.FILES.get("video")
+        if not vid:
+            return Response({"error": "No video"}, status=400)
+        if vid.size > MAX_VIDEO_BYTES:
+            return Response({"error": "Video > 1 GiB – please compress first"}, 413)
 
-        done_path = os.path.join(job_path, 'done.txt')
-        output_path = os.path.join(job_path, 'out.jpg')
+        job = enqueue_video_grayscale_job(vid)
+        try:
+            wait_for_file(job / "done.txt", timeout=600)
+        except TimeoutError:
+            return Response({"error": "Hardware timeout"}, status=504)
 
-        for _ in range(30):  # wait up to 30 seconds
-            if os.path.exists(done_path) and os.path.exists(output_path):
-                with open(output_path, 'rb') as f:
-                    image_bytes = f.read()
+        trim_video_history()
+        return Response({
+            "video_url": f"/api/video/result/{job.name}/",
+            "hw_time":   read_time(job),
+        })
 
-                # Cleanup job folder after response is prepared
-                try:
-                    shutil.rmtree(job_path)
-                except Exception as cleanup_err:
-                    print(f"Cleanup error (grayscale): {cleanup_err}")
-                return HttpResponse(image_bytes, content_type='image/jpeg')
-            time.sleep(1)
 
-        return JsonResponse({"error": "Timeout or processing failed"}, status=504)
+# -------------------------------------------------------------- video: filt
+class VideoFilterAPIView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request):
+        vid = request.FILES.get("video")
+        raw = request.data.get("filter", "").strip()
+        coeffs = list(map(int, raw.split())) if raw else []
+        factor = int(request.data.get("factor", 1) or 1)
+
+        if not vid:
+            return Response({"error": "No video"}, status=400)
+        if vid.size > MAX_VIDEO_BYTES:
+            return Response({"error": "Video > 1 GiB – please compress first"}, 413)
+        if not OK_3X3(coeffs):
+            return Response({"error": "Kernel must have 9 integers"}, status=400)
+        if factor <= 0:
+            return Response({"error": "Factor must be positive"}, status=400)
+
+        job = enqueue_video_filter_job(vid, coeffs, factor)
+        try:
+            wait_for_file(job / "done.txt", timeout=600)
+        except TimeoutError:
+            return Response({"error": "Hardware timeout"}, status=504)
+
+        trim_video_history()
+        return Response({
+            "video_url": f"/api/video/result/{job.name}/",
+            "hw_time":   read_time(job),
+        })
+
+
+# ----------------------------------------------------------- video download
+class VideoResultAPIView(APIView):
+    def get(self, _, job_id: str):
+        video_path = JOBS_ROOT / job_id / "out.mp4"
+        if not video_path.exists():
+            raise Http404
+        return FileResponse(open(video_path, "rb"),
+                            content_type="video/mp4",
+                            as_attachment=False,
+                            filename="result.mp4")
+
+
+# --------------------------------------------------------------------------- #
+# Job history
+# --------------------------------------------------------------------------- #
+class HistoryAPIView(APIView):
+    def get(self, _):
+        return Response(list_history())
+
+    def delete(self, _):
+        # wipe all completed jobs
+        removed = []
+        for j in JOBS_ROOT.iterdir():
+            shutil.rmtree(j, ignore_errors=True)
+            removed.append(j.name)
+        return Response({"deleted": removed}, status=204)

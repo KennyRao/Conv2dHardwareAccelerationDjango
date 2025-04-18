@@ -1,3 +1,4 @@
+# mysite/mysite/urls.py
 """
 URL configuration for mysite project.
 
@@ -14,14 +15,22 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
-from django.urls import path
-from api.views import TestAPIView, GrayscaleAPIView, grayscale_test_view, FilterAPIView, filter_test_view
+from django.urls import path, include
+from api.views import (
+    grayscale_test_view,
+    filter_test_view,
+)
+from imaging import urls as img_urls
+from api import urls as api_urls
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('test/', TestAPIView.as_view()),
-    path('grayscale/', GrayscaleAPIView.as_view()),
-    path('grayscale_test/', grayscale_test_view),
-    path('filter/', FilterAPIView.as_view()),
-    path('filter_test/', filter_test_view)
+    # Front‑end pages
+    path("", include(img_urls)),
+
+    # APIs
+    path("api/", include(api_urls)),
+
+    # Test pages
+    path("grayscale_test/", grayscale_test_view),
+    path("filter_test/",    filter_test_view),
 ]

@@ -1,0 +1,65 @@
+// mysite/imaging/static/imaging/js/filter.js
+import { getCSRF, fetchOpts } from "./csrf.js";
+
+const templateSel = document.getElementById("templateSelect");
+const filtInput = document.getElementById("filterInput");
+const factorInput = document.querySelector('input[name="factor"]');
+const spinner = document.getElementById("spinnerOverlay");
+
+const presets = {
+    "": { k: "", f: 1 },
+    "edge": { k: "-1 -1 -1 -1 8 -1 -1 -1 -1", f: 1 },
+    "sharpen": { k: "0 -1 0 -1 5 -1 0 -1 0", f: 1 },
+    "box": { k: "1 1 1 1 1 1 1 1 1", f: 9 },
+    "gauss": { k: "1 2 1 2 4 2 1 2 1", f: 16 },
+    "boxstrong": { k: "2 2 2 2 4 2 2 2 2", f: 20 },
+    "emboss": { k: "-2 -1 0 -1 1 1 0 1 2", f: 1 },
+    "identity": { k: "0 0 0 0 1 0 0 0 0", f: 1 },
+};
+
+templateSel.addEventListener("change", () => {
+    const p = presets[templateSel.value];
+    if (p) {
+        filtInput.value = p.k;
+        factorInput.value = p.f;
+    }
+});
+
+document.getElementById("vfForm").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const form = ev.target;
+    const coeffs = form.filter.value.trim().split(/\s+/);
+    if (coeffs.length !== 9) {
+        alert("Kernel must have exactly 9 numbers.");
+        return;
+    }
+
+    const fd = new FormData(form);
+
+    try {
+        spinner.style.display = "block";
+        const r = await fetch("/api/video/filter/", {
+            ...fetchOpts,
+            method: "POST",
+            body: fd,
+            headers: { "X-CSRFToken": getCSRF() },
+        });
+        if (!r.ok) {
+            const msg = await r.json().catch(() => ({}));
+            throw new Error(msg.error || "Upload failed");
+        }
+        const d = await r.json();
+        const wrap = document.getElementById("results");
+        wrap.innerHTML = ""; wrap.style.display = "flex";
+        wrap.insertAdjacentHTML("beforeend", `
+            <div class="col">
+                <div class="card h-100 shadow-sm">
+                <video src="${d.video_url}" controls class="card-img-top"></video>
+                <div class="card-body py-2"><h6 class="card-title mb-0">
+                    Hardware (${d.hw_time})
+                </h6></div>
+                </div>
+            </div>`);
+    } catch (err) { alert(err.message); }
+    finally { spinner.style.display = "none"; }
+});

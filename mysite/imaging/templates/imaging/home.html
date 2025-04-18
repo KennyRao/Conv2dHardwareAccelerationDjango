@@ -1,0 +1,12 @@
+{% extends "imaging/base.html" %}
+{% comment %} mysite/imaging/templates/imaging/home.html {% endcomment %}
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title">Welcome!</h2>
+    <p class="card-text">Choose an operation:</p>
+    <a class="btn btn-primary me-2" href="{% url 'grayscale_page' %}">Grayscale demo</a>
+    <a class="btn btn-secondary" href="{% url 'filter_page' %}">Filter demo</a>
+  </div>
+</div>
+{% endblock %}

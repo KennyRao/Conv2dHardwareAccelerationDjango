@@ -1,0 +1,38 @@
+{% extends "imaging/base.html" %}
+{% comment %} mysite/imaging/templates/imaging/filter.html {% endcomment %}
+{% load static %}
+{% block content %}
+<h2>Hardware 3×3 Filter</h2>
+<form id="fltForm" class="mb-3">
+  {% csrf_token %}
+  <input class="form-control mb-2" type="file" name="image" required>
+
+  <label class="form-label fw-bold">Choose a template or enter 9 numbers:</label>
+  <select id="templateSelect" class="form-select mb-2">
+    <option value="">— Select template —</option>
+    <option value="edge">Edge Detect</option>
+    <option value="sharpen">Sharpen</option>
+    <option value="box">Blur (÷9)</option>
+    <option value="gauss">Gaussian Blur (÷16)</option>
+    <option value="boxstrong">Strong Blur (÷20)</option>
+    <option value="emboss">Emboss</option>
+    <option value="identity">Identity</option>
+  </select>
+
+  <input id="filterInput" class="form-control mb-2"
+         placeholder="-1 -1 … -1 (exactly 9 integers)" name="filter">
+
+  <label class="form-label">Factor (divisor):</label>
+  <input type="number" class="form-control mb-2" name="factor" value="1" required>
+
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" id="useScipyFlt" name="use_scipy">
+    <label class="form-check-label" for="useScipyFlt">Also run SciPy in software</label>
+  </div>
+
+  <button class="btn btn-success">Upload</button>
+</form>
+
+<div id="results" class="row row-cols-1 row-cols-md-3 g-3" style="display:none;"></div>
+<script type="module" src="{% static 'imaging/js/filter.js' %}"></script>
+{% endblock %}

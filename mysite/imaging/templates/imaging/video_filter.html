@@ -1,0 +1,32 @@
+{% extends "imaging/base.html" %}
+{% comment %} mysite/imaging/templates/imaging/video_filter.html {% endcomment %}
+{% load static %}
+{% block content %}
+<h2>Hardware 3×3 Filter — Video</h2>
+<form id="vfForm" class="mb-3">
+  {% csrf_token %}
+  <input type="file" name="video" accept="video/*" class="form-control mb-2" required>
+
+  <label class="form-label fw-bold">Choose a template or enter 9 numbers:</label>
+  <select id="templateSelect" class="form-select mb-2">
+    <option value="">— Select template —</option>
+    <option value="edge">Edge Detect</option>
+    <option value="sharpen">Sharpen</option>
+    <option value="box">Blur (÷9)</option>
+    <option value="gauss">Gaussian Blur (÷16)</option>
+    <option value="boxstrong">Strong Blur (÷20)</option>
+    <option value="emboss">Emboss</option>
+    <option value="identity">Identity</option>
+  </select>
+
+  <input id="filterInput" name="filter" class="form-control mb-2"
+         placeholder="-1 -1 … -1 (exactly 9 integers)">
+  <label class="form-label">Factor (divisor):</label>
+  <input type="number" name="factor" value="1" class="form-control mb-2" required>
+
+  <button class="btn btn-success">Upload</button>
+</form>
+
+<div id="results" class="row row-cols-1 g-3" style="display:none;"></div>
+<script type="module" src="{% static 'imaging/js/video_filter.js' %}"></script>
+{% endblock %}
