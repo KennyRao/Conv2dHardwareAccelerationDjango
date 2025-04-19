@@ -1,18 +1,19 @@
 {% extends "imaging/base.html" %}
-{% comment %} mysite/imaging/templates/imaging/history.html {% endcomment %}
 {% load static %}
 {% block content %}
-<h2>Job History</h2>
+<h2>Job History <small class="text-muted fs-6">(auto refreshes every 3 s)</small></h2>
 <button id="clrBtn" class="btn btn-danger mb-2">Clear history</button>
 
-<table class="table table-striped">
+<table class="table table-striped align-middle">
   <thead>
     <tr>
       <th>Time</th>
       <th>Kind</th>
+      <th>Status</th>
+      <th style="width:180px;">Progress</th>
       <th>Kernel</th>
       <th>Factor</th>
-      <th>HW time</th>
+      <th>HW time</th>
       <th>Preview</th>
       <th>Actions</th>
     </tr>
