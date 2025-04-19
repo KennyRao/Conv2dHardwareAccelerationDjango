@@ -1,5 +1,6 @@
-// mysite/imaging/static/imaging/js/filter.js
+// mysite/imaging/static/imaging/js/video_filter.js
 import { getCSRF, fetchOpts } from "./csrf.js";
+import { showLoading, hideLoading } from "./loading.js";
 
 const templateSel = document.getElementById("templateSelect");
 const filtInput = document.getElementById("filterInput");
@@ -25,9 +26,10 @@ templateSel.addEventListener("change", () => {
     }
 });
 
-document.getElementById("vfForm").addEventListener("submit", async ev => {
+document.getElementById("vfForm").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const form = ev.target;
+    const submitBtn = form.querySelector("button[type=submit]");
     const coeffs = form.filter.value.trim().split(/\s+/);
     if (coeffs.length !== 9) {
         alert("Kernel must have exactly 9 numbers.");
@@ -37,7 +39,8 @@ document.getElementById("vfForm").addEventListener("submit", async ev => {
     const fd = new FormData(form);
 
     try {
-        spinner.style.display = "block";
+        showLoading(spinner, submitBtn);
+
         const r = await fetch("/api/video/filter/", {
             ...fetchOpts,
             method: "POST",
@@ -49,17 +52,22 @@ document.getElementById("vfForm").addEventListener("submit", async ev => {
             throw new Error(msg.error || "Upload failed");
         }
         const d = await r.json();
+
         const wrap = document.getElementById("results");
-        wrap.innerHTML = ""; wrap.style.display = "flex";
+        wrap.innerHTML = "";
+        wrap.style.display = "flex";
         wrap.insertAdjacentHTML("beforeend", `
             <div class="col">
                 <div class="card h-100 shadow-sm">
-                <video src="${d.video_url}" controls class="card-img-top"></video>
-                <div class="card-body py-2"><h6 class="card-title mb-0">
-                    Hardware (${d.hw_time})
-                </h6></div>
+                    <video src="${d.video_url}" controls class="card-img-top"></video>
+                    <div class="card-body py-2">
+                        <h6 class="card-title mb-0">Hardware (${d.hw_time})</h6>
+                    </div>
                 </div>
             </div>`);
-    } catch (err) { alert(err.message); }
-    finally { spinner.style.display = "none"; }
+    } catch (err) {
+        alert(err.message);
+    } finally {
+        hideLoading(spinner, submitBtn);
+    }
 });

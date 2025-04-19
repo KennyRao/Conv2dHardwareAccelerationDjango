@@ -1,5 +1,6 @@
 // mysite/imaging/static/imaging/js/filter.js
 import { getCSRF, fetchOpts } from "./csrf.js";
+import { showLoading, hideLoading } from "./loading.js";
 
 const templateSel = document.getElementById("templateSelect");
 const filtInput = document.getElementById("filterInput");
@@ -28,6 +29,8 @@ templateSel.addEventListener("change", () => {
 document.getElementById("fltForm").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const form = ev.target;
+    const submitBtn = form.querySelector("button[type=submit]");
+
     const coeffs = form.filter.value.trim().split(/\s+/);
     if (coeffs.length !== 9) {
         alert("Kernel must have exactly 9 numbers.");
@@ -38,7 +41,8 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
     if (form.use_scipy.checked) fd.append("use_scipy", "on");
 
     try {
-        spinner.style.display = "block";
+        showLoading(spinner, submitBtn);
+
         const r = await fetch("/api/filter/", {
             ...fetchOpts,
             method: "POST",
@@ -49,14 +53,19 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
         const d = await r.json();
 
         const wrap = document.getElementById("results");
-        wrap.innerHTML = ""; wrap.style.display = "flex";
-        const card = (t, src) => `
-      <div class="col">
-        <div class="card h-100 shadow-sm">
-          <img src="${src}" class="card-img-top">
-          <div class="card-body py-2"><h6 class="card-title mb-0">${t}</h6></div>
-        </div>
-      </div>`;
+        wrap.innerHTML = "";
+        wrap.style.display = "flex";
+
+        const card = (title, src) => `
+            <div class="col">
+                <div class="card h-100 shadow-sm">
+                    <img src="${src}" class="card-img-top">
+                    <div class="card-body py-2">
+                        <h6 class="card-title mb-0">${title}</h6>
+                    </div>
+                </div>
+            </div>`;
+
         wrap.insertAdjacentHTML("beforeend", card("Original",
             URL.createObjectURL(form.image.files[0])));
         wrap.insertAdjacentHTML("beforeend", card(`Hardware (${d.hw_time})`,
@@ -64,6 +73,9 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
         if (d.sw_image)
             wrap.insertAdjacentHTML("beforeend", card(`SciPy (${d.sw_time})`,
                 `data:image/jpeg;base64,${d.sw_image}`));
-    } catch (e) { alert(e.message); }
-    finally { spinner.style.display = "none"; }
+    } catch (err) {
+        alert(err.message);
+    } finally {
+        hideLoading(spinner, submitBtn);
+    }
 });
