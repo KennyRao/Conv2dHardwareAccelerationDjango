@@ -1,12 +1,112 @@
 {% extends "imaging/base.html" %}
 {% comment %} mysite/imaging/templates/imaging/home.html {% endcomment %}
+{% load static %}
 {% block content %}
-<div class="card shadow-sm">
-  <div class="card-body">
-    <h2 class="card-title">Welcome!</h2>
-    <p class="card-text">Choose an operation:</p>
-    <a class="btn btn-primary me-2" href="{% url 'grayscale_page' %}">Grayscale demo</a>
-    <a class="btn btn-secondary" href="{% url 'filter_page' %}">Filter demo</a>
+
+<div class="p-5 mb-4 bg-dark text-white rounded-3 shadow-sm">
+  <div class="container-fluid py-5">
+    <h1 class="display-5 fw-bold">PYNQ Image &amp; Video Lab</h1>
+    <p class="col-lg-8 fs-5">
+      Run hardware-accelerated image <em>and</em> video processing
+      demos on the Zynq FPGA board directly from your browser.
+      Pick an operation below to get started, or jump to the
+      <a class="link-light text-decoration-underline"
+         href="{% url 'history_page' %}">job history</a>
+      to follow queued tasks in real&nbsp;time.
+    </p>
   </div>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4">
+
+  <!-- Grayscale (Image) -->
+  <div class="col">
+    <div class="card h-100 shadow-sm border-primary">
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">Grayscale (Image)</h5>
+        <p class="card-text flex-grow-1">
+          Convert a photo to luminance using a custom
+          FPGA grayscale kernel &mdash; see hardware
+          vs.&nbsp;software speed side&nbsp;by&nbsp;side.
+        </p>
+        <a href="{% url 'grayscale_page' %}"
+           class="btn btn-primary mt-auto align-self-start">
+          Try it&nbsp;↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3×3 Filter (Image) -->
+  <div class="col">
+    <div class="card h-100 shadow-sm border-success">
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">3×3 Filter (Image)</h5>
+        <p class="card-text flex-grow-1">
+          Experiment with edge-detect, blur, sharpen &amp; other
+          3×3 convolution kernels, or enter your own coefficients.
+        </p>
+        <a href="{% url 'filter_page' %}"
+           class="btn btn-success mt-auto align-self-start">
+          Try it&nbsp;↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grayscale (Video) -->
+  <div class="col">
+    <div class="card h-100 shadow-sm border-warning">
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">Grayscale (Video)</h5>
+        <p class="card-text flex-grow-1">
+          Hardware pipeline processes every frame of your
+          clip at up&nbsp;to&nbsp;1080p.  Download the
+          result once the job completes.
+        </p>
+        <a href="{% url 'video_grayscale_page' %}"
+           class="btn btn-warning text-white mt-auto align-self-start">
+          Try it&nbsp;↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3×3 Filter (Video) -->
+  <div class="col">
+    <div class="card h-100 shadow-sm border-danger">
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">3×3 Filter (Video)</h5>
+        <p class="card-text flex-grow-1">
+          Apply the same flexible 3×3 kernel to a complete
+          video stream &mdash; perfect for benchmarking the
+          DMA/FPGA throughput.
+        </p>
+        <a href="{% url 'video_filter_page' %}"
+           class="btn btn-danger mt-auto align-self-start">
+          Try it&nbsp;↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- History / Queue -->
+  <div class="col">
+    <div class="card h-100 shadow-sm border-secondary">
+      <div class="card-body d-flex flex-column">
+        <h5 class="card-title">Job History / Queue</h5>
+        <p class="card-text flex-grow-1">
+          Monitor running jobs, download completed images
+          and videos, or clear the log.  Progress bars update
+          automatically every time you refresh.
+        </p>
+        <a href="{% url 'history_page' %}"
+           class="btn btn-outline-secondary mt-auto align-self-start">
+          Open&nbsp;↗
+        </a>
+      </div>
+    </div>
+  </div>
+
 </div>
 {% endblock %}
