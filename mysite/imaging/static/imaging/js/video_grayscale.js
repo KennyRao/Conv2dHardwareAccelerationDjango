@@ -21,7 +21,7 @@ document.getElementById("vgForm").addEventListener("submit", async (e) => {
             headers: { "X-CSRFToken": getCSRF() },
         });
 
-        // job queued – always true for videos
+        // job queued - always true for videos
         if (r.status === 202) {
             const d = await r.json();
             hideLoading(spinner, submitBtn);

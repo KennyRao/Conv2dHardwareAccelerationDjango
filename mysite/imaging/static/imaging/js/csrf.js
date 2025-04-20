@@ -8,7 +8,7 @@ export function getCSRF() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     if (meta) return meta.getAttribute("content");
 
-    // 3) csrftoken cookie (last‑resort – unmasked token)
+    // 3) csrftoken cookie (last‑resort - unmasked token)
     const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
     if (m) return decodeURIComponent(m[1]);
 

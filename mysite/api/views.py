@@ -2,6 +2,7 @@
 from __future__ import annotations
 import base64, shutil
 from pathlib import Path
+from typing import Callable
 
 from django.http import FileResponse, Http404
 from rest_framework.views import APIView
@@ -30,17 +31,56 @@ class TestAPIView(APIView):
 
 
 # --------------------------------------------------------------------------- #
-# Helper - return a standard queued response
+# Helper - return a standard queued response
 # --------------------------------------------------------------------------- #
-def _queued(job) -> Response:
+def _queued(job, msg: str = "Job queued - please check progress in the History tab.") -> Response:
     return Response(
         {
             "job_id": job.name,
             "queued": True,
-            "message": "Job queued - check progress in the History tab."
+            "message": msg
         },
         status=status.HTTP_202_ACCEPTED,
     )
+
+# --------------------------------------------------------------------------- #
+# Helper - check is there any unfinished job created before
+# --------------------------------------------------------------------------- #
+def _has_pending_before(me: Path) -> bool:
+    for p in JOBS_ROOT.iterdir():
+        if p == me:
+            continue
+        if (p / "done.txt").exists() or (p / "error.txt").exists():
+            continue           # finished jobs don't count
+        if p.stat().st_mtime < me.stat().st_mtime:
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------- #
+# Helper - handle “quick-if-idle else queue” logic (images only)
+# --------------------------------------------------------------------------- #
+def _handle_image_request(enqueue_func: Callable[[], Path], do_software: Callable[[], tuple[str, str]] | None = None) -> Response:
+    job = enqueue_func()
+
+    # If another job is already running/queued, respond immediately
+    if _has_pending_before(job):
+        return _queued(job)
+
+    # Otherwise wait a bit - ideal case for single-image workflows
+    try:
+        wait_for_file(job / "done.txt", timeout=QUEUED_TIMEOUT)
+    except TimeoutError:
+        return _queued(job, "Job is taking longer than expected - please check progress in the History tab.")
+
+    # Finished quickly - return hardware (and optional software) image
+    hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
+    resp   = {"hw_image": hw_b64, "hw_time": read_time(job)}
+    if do_software is not None:
+        sw_b64, sw_time = do_software()
+        resp.update({"sw_image": sw_b64, "sw_time": f"{sw_time*1e3:.2f} ms"})
+    trim_image_history()
+    return Response(resp)
 
 
 # --------------------------------------------------------------------------- #
@@ -54,24 +94,10 @@ class GrayscaleAPIView(APIView):
         if not img:
             return Response({"error": "No image uploaded"}, status=400)
 
-        job = enqueue_grayscale_job(img)
-
-        try:
-            wait_for_file(job / "done.txt", timeout=QUEUED_TIMEOUT)
-        except TimeoutError:               # still queued / running
-            return _queued(job)
-
-        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
-        resp = {
-            "hw_image": hw_b64,
-            "hw_time": read_time(job),
-        }
-        if "use_scipy" in request.POST:
-            sw_b64, sw_t = run_scipy_gray(img)
-            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_t*1e3:.2f} ms"})
-
-        trim_image_history()
-        return Response(resp)
+        return _handle_image_request(
+            enqueue_func=lambda: enqueue_grayscale_job(img),
+            do_software=(lambda: run_scipy_gray(img)) if "use_scipy" in request.POST else None,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -94,24 +120,10 @@ class FilterAPIView(APIView):
         if factor <= 0:
             return Response({"error": "Factor must be positive"}, status=400)
 
-        job = enqueue_filter_job(img, coeffs, factor)
-
-        try:
-            wait_for_file(job / "done.txt", timeout=QUEUED_TIMEOUT)
-        except TimeoutError:
-            return _queued(job)
-
-        hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
-        resp = {
-            "hw_image": hw_b64,
-            "hw_time": read_time(job),
-        }
-        if "use_scipy" in request.POST:
-            sw_b64, sw_t = run_scipy_filter(img, coeffs, factor)
-            resp.update({"sw_image": sw_b64, "sw_time": f"{sw_t*1e3:.2f} ms"})
-
-        trim_image_history()
-        return Response(resp)
+        return _handle_image_request(
+            enqueue_func=lambda: enqueue_filter_job(img, coeffs, factor),
+            do_software=(lambda: run_scipy_filter(img, coeffs, factor)) if "use_scipy" in request.POST else None,
+        )
 
 
 # --------------------------------------------------------------------------- #

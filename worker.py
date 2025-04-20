@@ -83,7 +83,7 @@ current_overlay = current_dma = current_ip = None   # FPGA objects
 loaded_kernel  : Optional[str] = None              # "grayscale" | "filter"
 
 # --------------------------------------------------------------------------- #
-# Helper – job status I/O
+# Helper - job status I/O
 # --------------------------------------------------------------------------- #
 def _status_path(job: Path) -> Path:
     return job / STATUS_FILE

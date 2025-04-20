@@ -18,7 +18,7 @@ JOBS_ROOT            = Path(__file__).resolve().parent / "jobs"
 JOBS_ROOT.mkdir(exist_ok=True)
 MAX_WIDTH            = 1920
 MAX_HEIGHT           = 1080
-MAX_VIDEO_BYTES      = 1_073_741_824  # 1 GiB
+MAX_VIDEO_BYTES      = 1_073_741_824  # 1 GiB
 HISTORY_LIMIT_IMG    = 10
 HISTORY_LIMIT_VIDEO  = 1
 STATUS_FILE          = "status.json"
@@ -92,7 +92,7 @@ def enqueue_filter_job(uploaded_file, coeffs, factor: int):
 
 def enqueue_video_grayscale_job(uploaded_file):
     if uploaded_file.size > MAX_VIDEO_BYTES:
-        raise ValueError("Video exceeds 1 GiB limit")
+        raise ValueError("Video exceeds 1 GiB limit")
     job = create_job("job_vid")
     save_uploaded(uploaded_file, job / "in.mp4")
     (job / "kernel.txt").write_text("grayscale_video")
@@ -100,7 +100,7 @@ def enqueue_video_grayscale_job(uploaded_file):
 
 def enqueue_video_filter_job(uploaded_file, coeffs, factor: int):
     if uploaded_file.size > MAX_VIDEO_BYTES:
-        raise ValueError("Video exceeds 1 GiB limit")
+        raise ValueError("Video exceeds 1 GiB limit")
     job = create_job("job_vid")
     save_uploaded(uploaded_file, job / "in.mp4")
     (job / "kernel.txt").write_text("filter_video")
@@ -168,7 +168,7 @@ def list_history() -> list[dict]:
             "status":    stage,
             "progress":  pct,
             "time":      read_time(j),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
         }
 
         if (j / "out.jpg").exists():
