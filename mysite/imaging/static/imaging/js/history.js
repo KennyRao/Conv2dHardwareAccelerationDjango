@@ -5,9 +5,14 @@ import { showLoading, hideLoading } from "./loading.js";
 const spinner = document.getElementById("spinnerOverlay");
 const REFRESH_MS = 3000;
 
-async function loadHistory() {
+/**
+ * Fetch history JSON and rebuild the table.
+ * @param {boolean} useOverlay  ‑‑ true → show/hide the full‑screen spinner;
+ *                               false → silent background refresh.
+ */
+async function loadHistory(useOverlay = false) {
     try {
-        showLoading(spinner);
+        if (useOverlay) showLoading(spinner);
 
         const r = await fetch("/api/history/", { credentials: "same-origin" });
         if (!r.ok) throw new Error("Failed to fetch history");
@@ -54,7 +59,7 @@ async function loadHistory() {
     } catch (err) {
         alert(err.message);
     } finally {
-        hideLoading(spinner);
+        if (useOverlay) hideLoading(spinner);
     }
 }
 
@@ -69,15 +74,14 @@ document.getElementById("clrBtn").addEventListener("click", async () => {
             headers: { "X-CSRFToken": getCSRF() },
         });
         if (!r.ok) throw new Error("Failed to clear history");
-        loadHistory();
+        // Rebuild table with overlay once DELETE finishes
+        await loadHistory(true);
     } catch (err) {
         alert(err.message);
-    }
-    finally {
+    } finally {
         hideLoading(spinner);
     }
 });
 
-// initial & auto‑refresh
-loadHistory();
-setInterval(loadHistory, REFRESH_MS);
+loadHistory(true);
+setInterval(() => loadHistory(false), REFRESH_MS);
