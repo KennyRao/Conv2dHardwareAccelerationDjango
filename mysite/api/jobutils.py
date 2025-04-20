@@ -157,8 +157,8 @@ def list_history() -> list[dict]:
         is_video  = kind.endswith("_video")
         status    = read_status(j) or {"stage": "queued"}
         stage     = status.get("stage", "unknown")
-        prog_info = status.get("progress", {})
-        done, tot = prog_info.get("done", 0), prog_info.get("total", 0)
+        prog      = status.get("progress", {})
+        done, tot = prog.get("done", 0), prog.get("total", 0)
         pct       = int(done / tot * 100) if tot else (100 if stage == "finished" else 0)
 
         meta = {
@@ -166,15 +166,14 @@ def list_history() -> list[dict]:
             "kind":      kind,
             "is_video":  is_video,
             "status":    stage,
-            "progress":  pct,               # 0‑100
+            "progress":  pct,
             "time":      read_time(j),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S",
-                                       time.localtime(j.stat().st_mtime)),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
         }
 
-        # ready previews when available
         if (j / "out.jpg").exists():
-            meta["image"] = _encode(np.array(Image.open(j / "out.jpg")))
+            meta["image"]      = _encode(np.array(Image.open(j / "out.jpg")))
+            meta["image_url"]  = f"/api/image/result/{j.name}/"
         else:
             meta["image"] = ""
 

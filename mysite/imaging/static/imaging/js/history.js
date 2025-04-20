@@ -27,11 +27,17 @@ export async function loadHistory(useOverlay = false) {
                 ? `<img src="data:image/jpeg;base64,${j.image}" style="max-width:100px;">`
                 : "-";
 
-            const actions = j.is_video && j.status === "finished"
-                ? `<a href="${j.video_url}" download
-                       class="btn btn-sm btn-secondary">Download</a>`
-                : "-";
+            // Actions column
+            let actions = "-";
+            if (j.status === "finished") {
+                if (j.is_video) {
+                    actions = `<a href="${j.video_url}" download class="btn btn-sm btn-secondary">Download</a>`;
+                } else {
+                    actions = `<a href="${j.image_url}" download class="btn btn-sm btn-secondary">Download</a>`;
+                }
+            }
 
+            // Progress column
             const progBar = j.progress
                 ? `<div class="progress" style="height:18px;">
              <div class="progress-bar ${j.status === "error" ? "bg-danger" : ""}"
@@ -43,17 +49,17 @@ export async function loadHistory(useOverlay = false) {
            </div>` : "-";
 
             tbody.insertAdjacentHTML("beforeend", `
-        <tr>
-          <td>${j.timestamp}</td>
-          <td>${j.kind}</td>
-          <td>${j.status}</td>
-          <td>${progBar}</td>
-          <td>${j.kernel ?? "-"}</td>
-          <td>${j.factor ?? "-"}</td>
-          <td>${j.time}</td>
-          <td>${preview}</td>
-          <td>${actions}</td>
-        </tr>`);
+                <tr>
+                <td>${j.timestamp}</td>
+                <td>${j.kind}</td>
+                <td>${j.status}</td>
+                <td>${progBar}</td>
+                <td>${j.kernel ?? "-"}</td>
+                <td>${j.factor ?? "-"}</td>
+                <td>${j.time}</td>
+                <td>${preview}</td>
+                <td>${actions}</td>
+                </tr>`);
         }
     } catch (err) {
         alert(err.message);
@@ -85,4 +91,5 @@ clearBtn.addEventListener("click", async () => {
     }
 });
 
+// Initialize
 loadHistory(true);

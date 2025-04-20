@@ -1,6 +1,6 @@
 # mysite/api/views.py
 from __future__ import annotations
-import base64, shutil, json
+import base64, shutil
 from pathlib import Path
 
 from django.http import FileResponse, Http404
@@ -14,7 +14,7 @@ from .jobutils import (
     enqueue_video_grayscale_job, enqueue_video_filter_job,
     wait_for_file, run_scipy_gray, run_scipy_filter,
     read_time, list_history, trim_image_history, trim_video_history,
-    JOBS_ROOT, MAX_VIDEO_BYTES, _encode
+    JOBS_ROOT, MAX_VIDEO_BYTES
 )
 
 OK_3X3 = lambda lst: len(lst) == 9
@@ -128,6 +128,7 @@ class VideoGrayscaleAPIView(APIView):
             return Response({"error": "Video > 1 GiB - please compress first"}, 413)
 
         job = enqueue_video_grayscale_job(vid)
+        trim_video_history()
         return _queued(job)  # always queue - videos are long
 
 
@@ -153,12 +154,26 @@ class VideoFilterAPIView(APIView):
             return Response({"error": "Factor must be positive"}, status=400)
 
         job = enqueue_video_filter_job(vid, coeffs, factor)
+        trim_video_history()
         return _queued(job)  # always queue - videos are long
 
 
 # --------------------------------------------------------------------------- #
-# Video result download
+# Results download
 # --------------------------------------------------------------------------- #
+class ImageResultAPIView(APIView):
+    """
+    Download finished image (out.jpg) for a job.
+    """
+    def get(self, _, job_id: str):
+        img_path: Path = JOBS_ROOT / job_id / "out.jpg"
+        if not img_path.exists():
+            raise Http404
+        return FileResponse(open(img_path, "rb"),
+                            content_type="image/jpeg",
+                            as_attachment=True,
+                            filename="result.jpg")
+
 class VideoResultAPIView(APIView):
     def get(self, _, job_id: str):
         video_path = JOBS_ROOT / job_id / "out.mp4"
@@ -166,7 +181,7 @@ class VideoResultAPIView(APIView):
             raise Http404
         return FileResponse(open(video_path, "rb"),
                             content_type="video/mp4",
-                            as_attachment=True,   # force download
+                            as_attachment=True,
                             filename="result.mp4")
 
 
