@@ -2,8 +2,18 @@
 {% comment %} mysite/imaging/templates/imaging/history.html {% endcomment %}
 {% load static %}
 {% block content %}
-<h2>Job History <small class="text-muted fs-6">(auto refreshes every 3 s)</small></h2>
-<button id="clrBtn" class="btn btn-danger mb-2">Clear history</button>
+<h2 class="d-flex align-items-center justify-content-between">
+  <span>Job History</span>
+
+  <span>
+    <button id="refreshBtn" class="btn btn-outline-primary me-2">
+      ↻ Refresh now
+    </button>
+    <button id="clrBtn"   class="btn btn-danger">
+      Clear history
+    </button>
+  </span>
+</h2>
 
 <table class="table table-striped align-middle">
   <thead>

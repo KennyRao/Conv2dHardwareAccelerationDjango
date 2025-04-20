@@ -3,14 +3,16 @@ import { getCSRF, fetchOpts } from "./csrf.js";
 import { showLoading, hideLoading } from "./loading.js";
 
 const spinner = document.getElementById("spinnerOverlay");
-const REFRESH_MS = 3000;
+const refreshBtn = document.getElementById("refreshBtn");
+const clearBtn = document.getElementById("clrBtn");
+const tbody = document.getElementById("history-body");
 
 /**
  * Fetch history JSON and rebuild the table.
  * @param {boolean} useOverlay  ‑‑ true → show/hide the full‑screen spinner;
  *                               false → silent background refresh.
  */
-async function loadHistory(useOverlay = false) {
+export async function loadHistory(useOverlay = false) {
     try {
         if (useOverlay) showLoading(spinner);
 
@@ -18,7 +20,6 @@ async function loadHistory(useOverlay = false) {
         if (!r.ok) throw new Error("Failed to fetch history");
         const list = await r.json();
 
-        const tbody = document.getElementById("history-body");
         tbody.innerHTML = "";
 
         for (const j of list) {
@@ -63,8 +64,11 @@ async function loadHistory(useOverlay = false) {
     }
 }
 
+// manual refresh button
+refreshBtn.addEventListener("click", () => loadHistory(true));
+
 // clear‑all button
-document.getElementById("clrBtn").addEventListener("click", async () => {
+clearBtn.addEventListener("click", async () => {
     if (!confirm("Clear ALL history (images + videos)?")) return;
     try {
         showLoading(spinner);
@@ -84,4 +88,3 @@ document.getElementById("clrBtn").addEventListener("click", async () => {
 });
 
 loadHistory(true);
-setInterval(() => loadHistory(false), REFRESH_MS);
