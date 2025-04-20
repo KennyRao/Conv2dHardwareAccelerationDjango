@@ -28,10 +28,8 @@ export async function loadHistory(useOverlay = false) {
                 : "-";
 
             const actions = j.is_video && j.status === "finished"
-                ? `<a href="${j.video_url}" target="_blank"
-               class="btn btn-sm btn-primary me-1">Play</a>
-           <a href="${j.video_url}" download
-               class="btn btn-sm btn-secondary">Download</a>`
+                ? `<a href="${j.video_url}" download
+                       class="btn btn-sm btn-secondary">Download</a>`
                 : "-";
 
             const progBar = j.progress

@@ -3,6 +3,7 @@ import { getCSRF, fetchOpts } from "./csrf.js";
 import { showLoading, hideLoading } from "./loading.js";
 
 const spinner = document.getElementById("spinnerOverlay");
+const alertWrap = document.getElementById("alertArea");
 
 document.getElementById("vgForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -19,24 +20,18 @@ document.getElementById("vgForm").addEventListener("submit", async (e) => {
             body: fd,
             headers: { "X-CSRFToken": getCSRF() },
         });
-        if (!r.ok) {
-            const msg = await r.json().catch(() => ({}));
-            throw new Error(msg.error || "Upload failed");
-        }
-        const d = await r.json();
 
-        const wrap = document.getElementById("results");
-        wrap.innerHTML = "";
-        wrap.style.display = "flex";
-        wrap.insertAdjacentHTML("beforeend", `
-            <div class="col">
-                <div class="card h-100 shadow-sm">
-                    <video src="${d.video_url}" controls class="card-img-top"></video>
-                    <div class="card-body py-2">
-                        <h6 class="card-title mb-0">Hardware (${d.hw_time})</h6>
-                    </div>
-                </div>
-            </div>`);
+        // job queued – always true for videos
+        if (r.status === 202) {
+            const d = await r.json();
+            hideLoading(spinner, submitBtn);
+            alertWrap.innerHTML = `
+                <div class="alert alert-info d-flex justify-content-between" role="alert">
+                    <span>${d.message}</span>
+                    <a class="btn btn-sm btn-outline-primary" href="/history/">Go to history ↗</a>
+                </div>`;
+            return;
+        }
     } catch (err) {
         alert(err.message);
     } finally {

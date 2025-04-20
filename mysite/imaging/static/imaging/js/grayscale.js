@@ -3,6 +3,7 @@ import { getCSRF, fetchOpts } from "./csrf.js";
 import { showLoading, hideLoading } from "./loading.js";
 
 const spinner = document.getElementById("spinnerOverlay");
+const alertWrap = document.getElementById("alertArea");
 
 document.getElementById("gsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -20,6 +21,20 @@ document.getElementById("gsForm").addEventListener("submit", async (e) => {
             body: fd,
             headers: { "X-CSRFToken": getCSRF() },
         });
+
+        // job is queued
+        if (r.status === 202) {
+            const d = await r.json();
+            hideLoading(spinner, submitBtn);
+            alertWrap.innerHTML = `
+                <div class="alert alert-info d-flex justify-content-between" role="alert">
+                    <span>${d.message}</span>
+                    <a class="btn btn-sm btn-outline-primary" href="/history/">Go to history ↗</a>
+                </div>`;
+            return;
+        }
+
+        // job is finished
         if (!r.ok) throw new Error("Upload failed");
         const d = await r.json();
 

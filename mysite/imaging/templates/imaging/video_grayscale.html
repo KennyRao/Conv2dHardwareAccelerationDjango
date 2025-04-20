@@ -2,11 +2,12 @@
 {% comment %} mysite/imaging/templates/imaging/video_grayscale.html {% endcomment %}
 {% load static %}
 {% block content %}
-<h2>Hardware Grayscale — Video</h2>
+<h2>Hardware Grayscale — Video</h2>
+<div id="alertArea"></div>
 <form id="vgForm" class="mb-3">
   {% csrf_token %}
   <input type="file" name="video" accept="video/*" class="form-control mb-2" required>
-  <div class="form-text mb-2">Max 1920×1080, ≤ 1 GiB.</div>
+  <div class="form-text mb-2">Max 1920×1080, ≤ 1 GiB.</div>
   <button class="btn btn-success">Upload</button>
 </form>
 

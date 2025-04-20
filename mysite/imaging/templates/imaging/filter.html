@@ -2,7 +2,8 @@
 {% comment %} mysite/imaging/templates/imaging/filter.html {% endcomment %}
 {% load static %}
 {% block content %}
-<h2>Hardware 3×3 Filter</h2>
+<h2>Hardware 3×3 Filter</h2>
+<div id="alertArea"></div>
 <form id="fltForm" class="mb-3">
   {% csrf_token %}
   <input class="form-control mb-2" type="file" name="image" required>
@@ -10,11 +11,11 @@
   <label class="form-label fw-bold">Choose a template or enter 9 numbers:</label>
   <select id="templateSelect" class="form-select mb-2">
     <option value="">— Select template —</option>
-    <option value="edge">Edge Detect</option>
+    <option value="edge">Edge Detect</option>
     <option value="sharpen">Sharpen</option>
-    <option value="box">Blur (÷9)</option>
-    <option value="gauss">Gaussian Blur (÷16)</option>
-    <option value="boxstrong">Strong Blur (÷20)</option>
+    <option value="box">Blur (÷9)</option>
+    <option value="gauss">Gaussian Blur (÷16)</option>
+    <option value="boxstrong">Strong Blur (÷20)</option>
     <option value="emboss">Emboss</option>
     <option value="identity">Identity</option>
   </select>

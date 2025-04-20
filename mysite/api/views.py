@@ -1,23 +1,24 @@
 # mysite/api/views.py
 from __future__ import annotations
-import shutil
-import base64
+import base64, shutil, json
+from pathlib import Path
 
 from django.http import FileResponse, Http404
-from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework import status
 
 from .jobutils import (
     enqueue_grayscale_job, enqueue_filter_job,
     enqueue_video_grayscale_job, enqueue_video_filter_job,
     wait_for_file, run_scipy_gray, run_scipy_filter,
     read_time, list_history, trim_image_history, trim_video_history,
-    JOBS_ROOT, MAX_VIDEO_BYTES
+    JOBS_ROOT, MAX_VIDEO_BYTES, _encode
 )
 
-OK_3X3 = lambda lst: len(lst) == 9  # noqa: E731
+OK_3X3 = lambda lst: len(lst) == 9
+QUEUED_TIMEOUT = 10  # seconds to wait before giving 202
 
 
 # --------------------------------------------------------------------------- #
@@ -29,14 +30,17 @@ class TestAPIView(APIView):
 
 
 # --------------------------------------------------------------------------- #
-# Tests (not for final presentation)
+# Helper - return a standard queued response
 # --------------------------------------------------------------------------- #
-def grayscale_test_view(request):
-    return render(request, "grayscale_post_test.html")
-
-
-def filter_test_view(request):
-    return render(request, "filter_post_test.html")
+def _queued(job) -> Response:
+    return Response(
+        {
+            "job_id": job.name,
+            "queued": True,
+            "message": "Job queued - check progress in the History tab."
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -51,10 +55,11 @@ class GrayscaleAPIView(APIView):
             return Response({"error": "No image uploaded"}, status=400)
 
         job = enqueue_grayscale_job(img)
+
         try:
-            wait_for_file(job / "done.txt")
-        except TimeoutError:
-            return Response({"error": "Hardware timeout"}, status=504)
+            wait_for_file(job / "done.txt", timeout=QUEUED_TIMEOUT)
+        except TimeoutError:               # still queued / running
+            return _queued(job)
 
         hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
         resp = {
@@ -90,10 +95,11 @@ class FilterAPIView(APIView):
             return Response({"error": "Factor must be positive"}, status=400)
 
         job = enqueue_filter_job(img, coeffs, factor)
+
         try:
-            wait_for_file(job / "done.txt")
+            wait_for_file(job / "done.txt", timeout=QUEUED_TIMEOUT)
         except TimeoutError:
-            return Response({"error": "Hardware timeout"}, status=504)
+            return _queued(job)
 
         hw_b64 = base64.b64encode((job / "out.jpg").read_bytes()).decode()
         resp = {
@@ -108,7 +114,9 @@ class FilterAPIView(APIView):
         return Response(resp)
 
 
-# -------------------------------------------------------------- video: gray
+# --------------------------------------------------------------------------- #
+# Video → Grayscale
+# --------------------------------------------------------------------------- #
 class VideoGrayscaleAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
@@ -117,22 +125,15 @@ class VideoGrayscaleAPIView(APIView):
         if not vid:
             return Response({"error": "No video"}, status=400)
         if vid.size > MAX_VIDEO_BYTES:
-            return Response({"error": "Video > 1 GiB – please compress first"}, 413)
+            return Response({"error": "Video > 1 GiB - please compress first"}, 413)
 
         job = enqueue_video_grayscale_job(vid)
-        try:
-            wait_for_file(job / "done.txt", timeout=600)
-        except TimeoutError:
-            return Response({"error": "Hardware timeout"}, status=504)
-
-        trim_video_history()
-        return Response({
-            "video_url": f"/api/video/result/{job.name}/",
-            "hw_time":   read_time(job),
-        })
+        return _queued(job)  # always queue - videos are long
 
 
-# -------------------------------------------------------------- video: filt
+# --------------------------------------------------------------------------- #
+# Video → Filter
+# --------------------------------------------------------------------------- #
 class VideoFilterAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
@@ -145,26 +146,19 @@ class VideoFilterAPIView(APIView):
         if not vid:
             return Response({"error": "No video"}, status=400)
         if vid.size > MAX_VIDEO_BYTES:
-            return Response({"error": "Video > 1 GiB – please compress first"}, 413)
+            return Response({"error": "Video > 1 GiB - please compress first"}, 413)
         if not OK_3X3(coeffs):
             return Response({"error": "Kernel must have 9 integers"}, status=400)
         if factor <= 0:
             return Response({"error": "Factor must be positive"}, status=400)
 
         job = enqueue_video_filter_job(vid, coeffs, factor)
-        try:
-            wait_for_file(job / "done.txt", timeout=600)
-        except TimeoutError:
-            return Response({"error": "Hardware timeout"}, status=504)
-
-        trim_video_history()
-        return Response({
-            "video_url": f"/api/video/result/{job.name}/",
-            "hw_time":   read_time(job),
-        })
+        return _queued(job)  # always queue - videos are long
 
 
-# ----------------------------------------------------------- video download
+# --------------------------------------------------------------------------- #
+# Video result download
+# --------------------------------------------------------------------------- #
 class VideoResultAPIView(APIView):
     def get(self, _, job_id: str):
         video_path = JOBS_ROOT / job_id / "out.mp4"
@@ -172,7 +166,7 @@ class VideoResultAPIView(APIView):
             raise Http404
         return FileResponse(open(video_path, "rb"),
                             content_type="video/mp4",
-                            as_attachment=False,
+                            as_attachment=True,   # force download
                             filename="result.mp4")
 
 

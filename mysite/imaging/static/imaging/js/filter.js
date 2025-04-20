@@ -6,6 +6,7 @@ const templateSel = document.getElementById("templateSelect");
 const filtInput = document.getElementById("filterInput");
 const factorInput = document.querySelector('input[name="factor"]');
 const spinner = document.getElementById("spinnerOverlay");
+const alertWrap = document.getElementById("alertArea");
 
 const presets = {
     "": { k: "", f: 1 },
@@ -49,6 +50,19 @@ document.getElementById("fltForm").addEventListener("submit", async (ev) => {
             body: fd,
             headers: { "X-CSRFToken": getCSRF() },
         });
+
+        // job is queued
+        if (r.status === 202) {
+            const d = await r.json();
+            hideLoading(spinner, submitBtn);
+            alertWrap.innerHTML = `
+                        <div class="alert alert-info d-flex justify-content-between" role="alert">
+                            <span>${d.message}</span>
+                            <a class="btn btn-sm btn-outline-primary" href="/history/">Go to history ↗</a>
+                        </div>`;
+            return;
+        }
+
         if (!r.ok) throw new Error("Upload failed");
         const d = await r.json();
 

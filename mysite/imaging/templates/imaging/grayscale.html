@@ -2,7 +2,8 @@
 {% comment %} mysite/imaging/templates/imaging/grayscale.html {% endcomment %}
 {% load static %}
 {% block content %}
-<h2>Hardware Grayscale</h2>
+<h2>Hardware Grayscale</h2>
+<div id="alertArea"></div>
 <form id="gsForm" class="mb-3">
   {% csrf_token %}
   <input class="form-control mb-2" type="file" name="image" required>
