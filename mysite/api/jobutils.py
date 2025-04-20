@@ -145,41 +145,39 @@ def read_status(job: Path) -> dict:
 
 def list_history() -> list[dict]:
     """Return image + video job list (newest first) including live status."""
-    jobs = sorted(
-        (p for p in JOBS_ROOT.iterdir()),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
+    jobs = sorted(JOBS_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
 
     out: list[dict] = []
     for j in jobs:
-        kind      = (j / "kernel.txt").read_text().strip() if (j / "kernel.txt").exists() else "?"
-        is_video  = kind.endswith("_video")
-        status    = read_status(j) or {"stage": "queued"}
-        stage     = status.get("stage", "unknown")
-        prog      = status.get("progress", {})
+        kind = (j / "kernel.txt").read_text().strip() if (j / "kernel.txt").exists() else "?"
+        is_video = kind.endswith("_video")
+        status = read_status(j) or {"stage": "queued"}
+        stage = status.get("stage", "unknown")
+        prog = status.get("progress", {})
         done, tot = prog.get("done", 0), prog.get("total", 0)
-        pct       = int(done / tot * 100) if tot else (100 if stage == "finished" else 0)
+        pct = int(done / tot * 100) if tot else (100 if stage == "finished" else 0)
 
         meta = {
-            "id":        j.name,
-            "kind":      kind,
-            "is_video":  is_video,
-            "status":    stage,
-            "progress":  pct,
-            "time":      read_time(j),
+            "id": j.name,
+            "kind": kind,
+            "is_video": is_video,
+            "status": stage,
+            "progress": pct,
+            "time": read_time(j),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(j.stat().st_mtime)),
         }
 
+        # preview / download links
         if (j / "out.jpg").exists():
-            meta["image"]      = _encode(np.array(Image.open(j / "out.jpg")))
-            meta["image_url"]  = f"/api/image/result/{j.name}/"
+            meta["image"] = _encode(np.array(Image.open(j / "out.jpg")))
+            meta["image_url"] = f"/api/image/result/{j.name}/"
         else:
             meta["image"] = ""
 
         if is_video:
             meta["video_url"] = f"/api/video/result/{j.name}/"
-        elif kind == "filter" and (j / "filter.txt").exists():
+
+        if kind in ("filter", "filter_video") and (j / "filter.txt").exists():
             meta["factor"] = (j / "factor.txt").read_text().strip()
             meta["kernel"] = (j / "filter.txt").read_text().strip()
 
