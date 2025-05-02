@@ -33,13 +33,16 @@ log = logging.getLogger("worker")
 # --------------------------------------------------------------------------- #
 # Constants
 # --------------------------------------------------------------------------- #
-JOBS_DIR = Path("/home/xilinx/f_c_a_api/mysite/api/jobs")
+BASE_DIR = Path(__file__).parent           # /home/xilinx/f_c_a_api
+OVERLAYS  = BASE_DIR / "overlays"
+
+JOBS_DIR = BASE_DIR / "mysite" / "api" / "jobs"
 MAX_W, MAX_H = 1920, 1080  # resize cap for large videos
 
 STATUS_FILE = "status.json"
 OVERLAY_PATHS = {
-    "grayscale": "/home/xilinx/pynq/overlays/grayscale/grayscale.bit",
-    "filter":    "/home/xilinx/pynq/overlays/filter/filter.bit",
+    "grayscale": str(OVERLAYS / "grayscale"  / "grayscale.bit"),
+    "filter":    str(OVERLAYS / "filter"     / "filter.bit"),
 }
 
 # --------------------------------------------------------------------------- #
